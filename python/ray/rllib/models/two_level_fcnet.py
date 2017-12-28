@@ -2,10 +2,18 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import cloudpickle
 import tensorflow as tf
 
 from ray.rllib.models.model import Model
 from ray.rllib.models.fcnet import FullyConnectedNetwork
+
+
+USER_DATA_CONFIGS = [
+    "num_subpolicies",  # Number of subpolicies for a two-level network
+    "fn_choose_subpolicy",  # Function for choosing subpolicy
+    "fn_subpolicy_state",  # Function for mapping observations to subpolicy obs
+]
 
 
 class TwoLevelFCNetwork(Model):
@@ -16,7 +24,6 @@ class TwoLevelFCNetwork(Model):
     """
 
     def _init(self, inputs, num_outputs, options):
-        num_subpolicies = options.get("num_subpolicies", 1)
         subhiddens = options.get("fcnet_hiddens", [[256, 256]] * 1)
         fcnet_activation = options.get("fcnet_activation", "tanh")
         if fcnet_activation == "tanh":
@@ -26,10 +33,27 @@ class TwoLevelFCNetwork(Model):
         print("Constructing two level fcnet {} {}".format(subhiddens,
                                                          activation))
 
+        user_data = options.get("user_data", {})
+        for k in user_data.keys():
+            if k not in USER_DATA_CONFIGS:
+                raise Exception(
+                    "Unknown config key `{}`, all keys: {}".format(k,
+                                                                   USER_DATA_CONFIGS))
+        num_subpolicies = user_data.get("num_subpolicies", 1)
         # function which maps from observation to subpolicy observation
-        to_subpolicy_state = options.get("to_subpolicy_state", lambda x, k: x)
+        to_subpolicy_state = user_data.get("fn_subpolicy_state", None)
         # function which maps from observation to choice of subpolicy
-        choose_policy = options.get("choose_policy", lambda x: 0)
+        choose_policy = user_data.get("fn_choose_subpolicy", None)
+
+        if to_subpolicy_state is None:
+            to_subpolicy_state = lambda x, k: x
+        else:
+            to_subpolicy_state = cloudpickle.loads(bytes(to_subpolicy_state))
+
+        if choose_policy is None:
+            choose_policy = lambda x: x
+        else:
+            choose_policy = cloudpickle.loads(bytes(choose_policy))
 
         attention = tf.one_hot(choose_policy(inputs), num_subpolicies)
 
@@ -37,7 +61,7 @@ class TwoLevelFCNetwork(Model):
         for k in range(num_subpolicies):
             sub_options = options.copy()
             sub_options.update({"fcnet_hiddens": subhiddens[k]})
-            sub_options.update({"fcnet_tag": k})
+            sub_options["user_data"] = {"fcnet_tag": k}
             subinput = to_subpolicy_state(inputs, k)
             fcnet = FullyConnectedNetwork(
                 subinput, num_outputs, sub_options)

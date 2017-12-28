@@ -22,10 +22,9 @@ MODEL_CONFIGS = [
     "extra_frameskip",  # (int) for number of frames to skip
     "fcnet_activation",  # Nonlinearity for fully connected net (tanh, relu)
     "fcnet_hiddens",  # Number of hidden layers for fully connected net
-    "fcnet_tag",  # Optional tag for fcnets to allow for more than one
     "free_log_std",  # Documented in ray.rllib.models.Model
     "channel_major",  # Pytorch conv requires images to be channel-major
-    "num_subpolicies",  # Number of subpolicies for a two-level network
+    "user_data",  # Optional user data for specific models
 ]
 
 
@@ -79,7 +78,8 @@ class ModelCatalog(object):
         if obs_rank > 1:
             return VisionNetwork(inputs, num_outputs, options)
 
-        if options.get("num_subpolicies", 1) > 1:
+        # Use two-level network if the hidden sizes are a nested list
+        if isinstance(options.get("fcnet_hiddens", [1])[0], list):
             return TwoLevelFCNetwork(inputs, num_outputs, options)
 
         return FullyConnectedNetwork(inputs, num_outputs, options)
