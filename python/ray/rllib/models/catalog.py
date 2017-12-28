@@ -11,6 +11,7 @@ from ray.rllib.models.preprocessors import (
     OneHotPreprocessor)
 from ray.rllib.models.fcnet import FullyConnectedNetwork
 from ray.rllib.models.visionnet import VisionNetwork
+from ray.rllib.models.two_level_fcnet import TwoLevelFCNetwork
 
 
 MODEL_CONFIGS = [
@@ -23,6 +24,7 @@ MODEL_CONFIGS = [
     "fcnet_hiddens",  # Number of hidden layers for fully connected net
     "free_log_std",  # Documented in ray.rllib.models.Model
     "channel_major",  # Pytorch conv requires images to be channel-major
+    "num_subpolicies",  # Number of subpolicies for a two-level network
 ]
 
 
@@ -75,6 +77,9 @@ class ModelCatalog(object):
 
         if obs_rank > 1:
             return VisionNetwork(inputs, num_outputs, options)
+
+        if options.get("num_subpolicies", 1) > 1:
+            return TwoLevelFCNetwork(inputs, num_outputs, options)
 
         return FullyConnectedNetwork(inputs, num_outputs, options)
 
