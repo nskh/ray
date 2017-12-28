@@ -42,6 +42,6 @@ class Model(object):
             self.outputs = tf.concat(
                 [self.outputs, 0.0 * self.outputs + log_std], 1)
 
-    def _init(self, inputs, num_outputs, options):
+    def _init(self):
         """Builds and returns the output and last layer of the network."""
         raise NotImplementedError

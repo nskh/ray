@@ -3,14 +3,17 @@ from __future__ import division
 from __future__ import print_function
 
 import tensorflow as tf
-import tensorflow.contrib.slim as slim
 
 from ray.rllib.models.model import Model
 from ray.rllib.models.fcnet import FullyConnectedNetwork
 
 
 class TwoLevelFCNetwork(Model):
-    """Generic fully connected network."""
+    """
+    Two-level fully connected network, consisting of a number of
+    subpolicies and a pre-specified function which chooses among the
+    subpolicies.
+    """
 
     def _init(self, inputs, num_outputs, options):
         num_subpolicies = options.get("num_subpolicies", 1)
@@ -23,13 +26,14 @@ class TwoLevelFCNetwork(Model):
         print("Constructing two level fcnet {} {}".format(subhiddens,
                                                          activation))
 
+        # function which maps from observation to subpolicy observation
         to_subpolicy_state = options.get("to_subpolicy_state", lambda x, k: x)
+        # function which maps from observation to choice of subpolicy
         choose_policy = options.get("choose_policy", lambda x: 0)
 
         attention = tf.one_hot(choose_policy(inputs), num_subpolicies)
 
         outputs = []
-        # last_layers = []
         for k in range(num_subpolicies):
             sub_options = options.copy()
             sub_options.update({"fcnet_hiddens": subhiddens[k]})

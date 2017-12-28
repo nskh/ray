@@ -22,6 +22,7 @@ MODEL_CONFIGS = [
     "extra_frameskip",  # (int) for number of frames to skip
     "fcnet_activation",  # Nonlinearity for fully connected net (tanh, relu)
     "fcnet_hiddens",  # Number of hidden layers for fully connected net
+    "fcnet_tag",  # Optional tag for fcnets to allow for more than one
     "free_log_std",  # Documented in ray.rllib.models.Model
     "channel_major",  # Pytorch conv requires images to be channel-major
     "num_subpolicies",  # Number of subpolicies for a two-level network
