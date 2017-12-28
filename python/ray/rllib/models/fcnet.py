@@ -22,19 +22,20 @@ class FullyConnectedNetwork(Model):
             activation = tf.nn.relu
         print("Constructing fcnet {} {}".format(hiddens, activation))
 
+        singular = fcnet_tag is None
         with tf.name_scope("fc_net"):
             i = 1
             last_layer = inputs
             for size in hiddens:
-                label = "i" if not fcnet_tag else "{}_{}".format(fcnet_tag, i)
+                label = ("fc{}" if singular else "fc{}_{}").format(
+                    fcnet_tag, i)
                 last_layer = slim.fully_connected(
                     last_layer, size,
                     weights_initializer=normc_initializer(1.0),
                     activation_fn=activation,
                     scope=label)
                 i += 1
-            label = "fc_out" if not fcnet_tag else "fc_out_{}".format(fcnet_tag,
-                i)
+            label = "fc_out" if singular else "fc_out_{}".format(fcnet_tag, i)
             output = slim.fully_connected(
                 last_layer, num_outputs,
                 weights_initializer=normc_initializer(0.01),
