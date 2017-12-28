@@ -12,6 +12,7 @@ USER_DATA_CONFIGS = [
     "fcnet_tag",  # Optional tag for fcnets to allow for more than one
 ]
 
+
 class FullyConnectedNetwork(Model):
     """Generic fully connected network."""
 
@@ -29,7 +30,7 @@ class FullyConnectedNetwork(Model):
             if k not in USER_DATA_CONFIGS:
                 raise Exception(
                     "Unknown config key `{}`, all keys: {}".format(k,
-                                                                   USER_DATA_CONFIGS))
+                                                            USER_DATA_CONFIGS))
         fcnet_tag = user_data.get("fcnet_tag", None)
 
         singular = fcnet_tag is None
@@ -37,8 +38,7 @@ class FullyConnectedNetwork(Model):
             i = 1
             last_layer = inputs
             for size in hiddens:
-                label = ("fc{}" if singular else "fc{}_{}").format(
-                    fcnet_tag, i)
+                label = ("fc{}" if singular else "fc{}_{}").format(fcnet_tag, i)
                 last_layer = slim.fully_connected(
                     last_layer, size,
                     weights_initializer=normc_initializer(1.0),

@@ -8,7 +8,6 @@ import tensorflow as tf
 from ray.rllib.models.model import Model
 from ray.rllib.models.fcnet import FullyConnectedNetwork
 
-
 USER_DATA_CONFIGS = [
     "num_subpolicies",  # Number of subpolicies for a two-level network
     "fn_choose_subpolicy",  # Function for choosing subpolicy
@@ -38,7 +37,7 @@ class TwoLevelFCNetwork(Model):
             if k not in USER_DATA_CONFIGS:
                 raise Exception(
                     "Unknown config key `{}`, all keys: {}".format(k,
-                                                                   USER_DATA_CONFIGS))
+                                                            USER_DATA_CONFIGS))
         num_subpolicies = user_data.get("num_subpolicies", 1)
         # function which maps from observation to subpolicy observation
         to_subpolicy_state = user_data.get("fn_subpolicy_state", None)
