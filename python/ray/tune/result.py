@@ -22,7 +22,7 @@ In RLlib, the supplied algorithms fill in TrainingResult for you.
 """
 
 # Where ray.tune writes result files by default
-DEFAULT_RESULTS_DIR = os.path.expanduser("~/ray_results")
+DEFAULT_RESULTS_DIR = os.path.expanduser("~/Development/research/ray/ray_results")
 
 
 TrainingResult = namedtuple("TrainingResult", [

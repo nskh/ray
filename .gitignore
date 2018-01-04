@@ -20,6 +20,9 @@
 /src/local_scheduler/format/*_generated.h
 /src/ray/gcs/format/*_generated.h
 
+# Ray results should be ignored
+/ray_results/
+
 # Redis temporary files
 *dump.rdb
 
