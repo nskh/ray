@@ -81,7 +81,8 @@ DEFAULT_CONFIG = {
     "write_logs": True,
     # Preprocessing for environment
     # TODO(rliaw): Convert to function similar to A#c
-    "preprocessing": {}
+    "preprocessing": {},
+    "user_data": {}
 }
 
 
