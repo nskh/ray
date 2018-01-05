@@ -65,7 +65,9 @@ class TwoLevelFCNetwork(Model):
             fcnet = FullyConnectedNetwork(
                 subinput, num_outputs, sub_options)
             output, last_layer = fcnet.outputs, fcnet.last_layer
-            outputs.append(attention[k] * output)
+            rep_attention = tf.reshape(tf.tile(attention[:, k], [num_outputs]),
+                [-1, num_outputs])
+            outputs.append(rep_attention * output)
         overall_output = tf.add_n(outputs)
         # TODO(cathywu) check that outputs is not used later on because it's
         # a list instead of a layer

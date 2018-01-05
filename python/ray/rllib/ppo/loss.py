@@ -32,6 +32,9 @@ class ProximalPolicyLoss(object):
 
         if config["use_gae"]:
             vf_config = config["model"].copy()
+            # FIXME(cathywu) HACK
+            vf_config["fcnet_hiddens"] = [256, 256]
+            vf_config["user_data"] = {}
             # Do not split the last layer of the value function into
             # mean parameters and standard deviation parameters and
             # do not make the standard deviations free variables.
