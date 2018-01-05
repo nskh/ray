@@ -29,7 +29,7 @@ required_named = parser.add_argument_group("required named arguments")
 required_named.add_argument(
         "--run", type=str, required=True,
         help="The algorithm or model to train. This may refer to the name "
-        "of a built-in algorithm (e.g. RLLib's DQN or PPO), or a "
+        "of a built-in algorithm (e.g. RLLib's DQN or PPO), or a " 
         "user-defined trainable function or class registered in the "
         "tune registry.")
 required_named.add_argument(
