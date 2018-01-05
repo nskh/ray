@@ -103,6 +103,10 @@ DEFAULT_CONFIG = dict(
     # (Experimental) Whether to use multiple GPUs for SGD optimization.
     # Note that this only helps performance if the SGD batch size is large.
     multi_gpu=False,
+
+    # === User data ===
+    # allows users to store custom values inside `params.json` output
+    # by updating config['user_data'] entries
     user_data={})
 
 
