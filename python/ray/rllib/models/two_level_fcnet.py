@@ -2,7 +2,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import cloudpickle
 import tensorflow as tf
 
 from ray.rllib.models.model import Model
@@ -42,17 +41,22 @@ class TwoLevelFCNetwork(Model):
         # function which maps from observation to subpolicy observation
         to_subpolicy_state = user_data.get("fn_subpolicy_state", None)
         # function which maps from observation to choice of subpolicy
-        choose_policy = user_data.get("fn_choose_subpolicy", None)
+        fn_choose_policy = user_data.get("fn_choose_subpolicy", None)
 
         if to_subpolicy_state is None:
             to_subpolicy_state = lambda x, k: x
         else:
-            to_subpolicy_state = cloudpickle.loads(bytes(to_subpolicy_state))
+            # defines to_subpolicy_state function
+            eval(compile(to_subpolicy_state, '<string>', 'exec'), globals())
+            to_subpolicy_state = globals()['to_subpolicy_state']
 
-        if choose_policy is None:
-            choose_policy = lambda x: x
+        if fn_choose_policy is None:
+            # choose_policy = lambda x: x
+            choose_policy = lambda x: tf.cast(x[:, 7] > 210, tf.int32)
         else:
-            choose_policy = cloudpickle.loads(bytes(choose_policy))
+            # defines choose_policy function
+            eval(compile(fn_choose_policy, '<string>', 'exec'), globals())
+            choose_policy = globals()['choose_policy']
 
         attention = tf.one_hot(choose_policy(inputs), num_subpolicies)
 
