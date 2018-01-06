@@ -81,7 +81,12 @@ DEFAULT_CONFIG = {
     "write_logs": True,
     # Preprocessing for environment
     # TODO(rliaw): Convert to function similar to A#c
-    "preprocessing": {}
+    "preprocessing": {},
+
+    # === User data ===
+    # allows users to store custom values inside `params.json` output
+    # by updating config['user_data'] entries
+    "user_data": {}
 }
 
 
