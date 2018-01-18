@@ -82,11 +82,6 @@ DEFAULT_CONFIG = {
     # Preprocessing for environment
     # TODO(rliaw): Convert to function similar to A#c
     "preprocessing": {},
-
-    # === User data ===
-    # allows users to store custom values inside `params.json` output
-    # by updating config['user_data'] entries
-    "user_data": {}
 }
 
 
