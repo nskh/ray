@@ -8,10 +8,6 @@ import tensorflow.contrib.slim as slim
 from ray.rllib.models.model import Model
 from ray.rllib.models.misc import normc_initializer
 
-USER_DATA_CONFIGS = [
-    "fcnet_tag",  # Optional tag for fcnets to allow for more than one
-]
-
 
 class FullyConnectedNetwork(Model):
     """Generic fully connected network."""
@@ -26,15 +22,6 @@ class FullyConnectedNetwork(Model):
             activation = tf.nn.relu
         print("Constructing fcnet {} {}".format(hiddens, activation))
 
-        user_data = options.get("user_data", {})
-        for k in user_data.keys():
-            if k not in USER_DATA_CONFIGS:
-                raise Exception(
-                    "Unknown config key `{}`, all keys: {}".format(k,
-                                                            USER_DATA_CONFIGS))
-        fcnet_tag = user_data.get("fcnet_tag", None)
-
-        singular = fcnet_tag is None
         with tf.name_scope("fc_net"):
             i = 1
             last_layer = inputs
