@@ -40,6 +40,8 @@ class ProximalPolicyLoss(object):
                 self.value_function = ModelCatalog.get_model(
                     registry, observations, 1, vf_config).outputs
             self.value_function = tf.reshape(self.value_function, [-1])
+            # if len(self.value_function.shape) > 1:
+            #     self.value_function = self.value_function[:, 0]
 
         # Make loss functions.
         self.ratio = tf.exp(self.curr_dist.logp(actions) -
@@ -58,6 +60,8 @@ class ProximalPolicyLoss(object):
             # We use a huber loss here to be more robust against outliers,
             # which seem to occur when the rollouts get longer (the variance
             # scales superlinearly with the length of the rollout)
+            # print("XXX value fn", self.value_function)
+            # print("XXX value targets", value_targets)
             self.vf_loss1 = tf.square(self.value_function - value_targets)
             vf_clipped = prev_vf_preds + tf.clip_by_value(
                 self.value_function - prev_vf_preds,

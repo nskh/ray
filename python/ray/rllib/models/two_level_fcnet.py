@@ -15,9 +15,9 @@ class TwoLevelFCNetwork(Model):
     """
 
     def _init(self, inputs, num_outputs, options):
-
         custom_options = options["custom_options"]
         subhiddens = custom_options.get("hierarchical_fcnet_hiddens", [[256, 256]] * 1)
+        print("Constructing two level fcnet {}".format(subhiddens))
         num_subpolicies = custom_options.get("num_subpolicies", 1)
         # function which maps from observation to subpolicy observation
         to_subpolicy_state = custom_options.get("fn_subpolicy_state", None)
@@ -33,13 +33,19 @@ class TwoLevelFCNetwork(Model):
 
         if fn_choose_policy is None:
             # choose_policy = lambda x: x
-            choose_policy = lambda x: tf.cast(x[:, 7] > 210, tf.int32)
+            # choose_policy = lambda x: tf.cast(x[:, 7] > 210, tf.int32)
+            attn_options = {"fcnet_hiddens": []}
+            attn_options["user_data"] = {"fcnet_tag": 'attn'}
+            # TODO add option to specify network hiddens
+            # TODO add option to one-hot / max the vector
+            fcnet = FullyConnectedNetwork(
+                inputs, num_subpolicies, attn_options)
+            attention = fcnet.outputs
         else:
             # defines choose_policy function
             eval(compile(fn_choose_policy, '<string>', 'exec'), globals())
             choose_policy = globals()['choose_policy']
-
-        attention = tf.one_hot(choose_policy(inputs), num_subpolicies)
+            attention = tf.one_hot(choose_policy(inputs), num_subpolicies)
 
         outputs = []
         for k in range(num_subpolicies):
@@ -49,7 +55,7 @@ class TwoLevelFCNetwork(Model):
                 subinput = to_subpolicy_state(inputs, k)
                 fcnet = FullyConnectedNetwork(
                     subinput, num_outputs, sub_options)
-                output, last_layer = fcnet.outputs, fcnet.last_layer
+                output = fcnet.outputs
                 rep_attention = tf.reshape(tf.tile(attention[:, k], [num_outputs]),
                     [-1, num_outputs])
                 outputs.append(rep_attention * output)
