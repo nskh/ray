@@ -104,12 +104,7 @@ DEFAULT_CONFIG = dict(
     async_updates=False,
     # (Experimental) Whether to use multiple GPUs for SGD optimization.
     # Note that this only helps performance if the SGD batch size is large.
-    multi_gpu=False,
-
-    # === User data ===
-    # allows users to store custom values inside `params.json` output
-    # by updating config['user_data'] entries
-    user_data={})
+    multi_gpu=False)
 
 
 class DQNAgent(Agent):
