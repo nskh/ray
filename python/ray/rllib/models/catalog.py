@@ -145,7 +145,8 @@ class ModelCatalog(object):
             return VisionNetwork(inputs, num_outputs, options)
 
         # Use two-level network if the hidden sizes are a nested list
-        if isinstance(options.get("fcnet_hiddens", [1])[0], list):
+        if "hierarchical_fcnet_hiddens" in options.get("custom_options",
+                                                       {}) and num_outputs > 1:
             return TwoLevelFCNetwork(inputs, num_outputs, options)
 
         return FullyConnectedNetwork(inputs, num_outputs, options)

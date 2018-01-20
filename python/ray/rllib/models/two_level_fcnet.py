@@ -7,6 +7,19 @@ import tensorflow as tf
 from ray.rllib.models.model import Model
 from ray.rllib.models.fcnet import FullyConnectedNetwork
 
+MODEL_CONFIGS = [
+    # === Required options ===
+    "num_subpolicies",  # Number of subpolicies in two-level fcnet
+    "hierarchical_fcnet_hiddens",  # Number of hidden layers for two-level fcnet
+    # === Other options ===
+    "switching_fcnet_hiddens",  # Number of hidden layers for switching network
+    # function which maps from observation to subpolicy observation
+    "fn_subpolicy_state",
+    # function which maps from observation to choice of subpolicy
+    "fn_choose_subpolicy",
+]
+
+
 class TwoLevelFCNetwork(Model):
     """
     Two-level fully connected network, consisting of a number of
@@ -34,7 +47,9 @@ class TwoLevelFCNetwork(Model):
         if fn_choose_policy is None:
             # choose_policy = lambda x: x
             # choose_policy = lambda x: tf.cast(x[:, 7] > 210, tf.int32)
-            attn_options = {"fcnet_hiddens": []}
+            switching_hiddens = custom_options.get("switching_fcnet_hiddens",
+                                                   [32, 32])
+            attn_options = {"fcnet_hiddens": switching_hiddens}
             attn_options["user_data"] = {"fcnet_tag": 'attn'}
             # TODO add option to specify network hiddens
             # TODO add option to one-hot / max the vector
