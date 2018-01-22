@@ -13,4 +13,3 @@ __all__ = ["ActionDistribution", "ActionDistribution", "Categorical",
            "DiagGaussian", "Deterministic", "ModelCatalog", "Model",
            "FullyConnectedNetwork", "ConvolutionalNetwork", "LSTM",
            "TwoLevelFCNetwork", "MultiAgentFullyConnectedNetwork"]
-
