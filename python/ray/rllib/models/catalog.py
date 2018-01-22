@@ -15,6 +15,7 @@ from ray.rllib.models.action_dist import (
 from ray.rllib.models.preprocessors import get_preprocessor
 from ray.rllib.models.fcnet import FullyConnectedNetwork
 from ray.rllib.models.visionnet import VisionNetwork
+from ray.rllib.models.two_level_fcnet import TwoLevelFCNetwork
 from ray.rllib.models.multiagentfcnet import MultiAgentFullyConnectedNetwork
 
 
@@ -29,7 +30,6 @@ MODEL_CONFIGS = [
     "fcnet_hiddens",  # Number of hidden layers for fully connected net
     "free_log_std",  # Documented in ray.rllib.models.Model
     "channel_major",  # Pytorch conv requires images to be channel-major
-
     # === Options for custom models ===
     "custom_preprocessor",  # Name of a custom preprocessor to use
     "custom_model",  # Name of a custom model to use
@@ -143,6 +143,11 @@ class ModelCatalog(object):
 
         if obs_rank > 1:
             return VisionNetwork(inputs, num_outputs, options)
+
+        # Use two-level network if the hidden sizes are a nested list
+        if "hierarchical_fcnet_hiddens" in options.get("custom_options",
+                                                       {}) and num_outputs > 1:
+            return TwoLevelFCNetwork(inputs, num_outputs, options)
 
         return FullyConnectedNetwork(inputs, num_outputs, options)
 

@@ -30,14 +30,14 @@ required_named = parser.add_argument_group("required named arguments")
 required_named.add_argument(
         "--run", type=str, required=True,
         help="The algorithm or model to train. This may refer to the name "
-        "of a built-on algorithm (e.g. RLLib's DQN or PPO), or a "
+        "of a built-in algorithm (e.g. RLLib's DQN or PPO), or a " 
         "user-defined trainable function or class registered in the "
         "tune registry.")
 required_named.add_argument(
         "--env", type=str, help="The gym environment to use.")
 parser.add_argument(
         "--no-render", default=False, action="store_const", const=True,
-        help="Surpress rendering of the environment.")
+        help="Supress rendering of the environment.")
 parser.add_argument(
         "--loop-forever", default=False, action="store_const", const=True,
         help="Run evaluation of the agent forever.")
