@@ -82,6 +82,9 @@ DEFAULT_CONFIG = {
     "write_logs": True,
     # Arguments to pass to the env creator
     "env_config": {},
+    # Preprocessing for environment
+    # TODO(rliaw): Convert to function similar to A#c
+    "preprocessing": {},
 }
 
 
