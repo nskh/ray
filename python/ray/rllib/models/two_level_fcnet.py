@@ -31,6 +31,7 @@ class TwoLevelFCNetwork(Model):
         custom_options = options["custom_options"]
         subhiddens = custom_options.get("hierarchical_fcnet_hiddens",
                                         [[256, 256]] * 1)
+
         print("Constructing two level fcnet {}".format(subhiddens))
         num_subpolicies = custom_options.get("num_subpolicies", 1)
         # function which maps from observation to subpolicy observation
