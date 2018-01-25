@@ -10,7 +10,7 @@ from ray.rllib.models.fcnet import FullyConnectedNetwork
 MODEL_CONFIGS = [
     # === Required options ===
     "num_subpolicies",  # Number of subpolicies in two-level fcnet
-    "fcnet_hiddens",  # Num. of hidden layers for two-level fcnet
+    "hierarchical_fcnet_hiddens",  # Num. of hidden layers for two-level fcnet
     # === Other options ===
     "switching_fcnet_hiddens",  # Number of hidden layers for switching network
     # function which maps from observation to subpolicy observation
@@ -29,7 +29,7 @@ class TwoLevelFCNetwork(Model):
 
     def _init(self, inputs, num_outputs, options):
         custom_options = options["custom_options"]
-        subhiddens = custom_options.get("fcnet_hiddens",
+        subhiddens = custom_options.get("hierarchical_fcnet_hiddens",
                                         [[256, 256]] * 1)
 
         print("Constructing two level fcnet {}".format(subhiddens))

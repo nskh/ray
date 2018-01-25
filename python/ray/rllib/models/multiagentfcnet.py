@@ -47,7 +47,10 @@ class MultiAgentFullyConnectedNetwork(Model):
                         sub_options.update({c: options[c]})
                     if c in custom_options:
                         sub_options.update({c: custom_options[c]})
-                sub_options.update({"fcnet_hiddens": hiddens[i]})
+                if "hierarchical_fcnet_hiddens" in sub_options:
+                    sub_options.update({"hierarchical_fcnet_hiddens": hiddens[i]})
+                else:
+                    sub_options.update({"fcnet_hiddens": hiddens[i]})
                 fcnet = network_cls(split_inputs[i], int(num_actions[i]),
                                     sub_options)
                 output = fcnet.outputs
