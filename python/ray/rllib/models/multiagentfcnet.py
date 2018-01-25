@@ -6,6 +6,9 @@ import tensorflow as tf
 
 from ray.rllib.models.model import Model
 from ray.rllib.models.fcnet import FullyConnectedNetwork
+from ray.rllib.models.two_level_fcnet import TwoLevelFCNetwork
+from ray.rllib.models.fcnet import MODEL_CONFIGS as FCN_CONFIGS
+from ray.rllib.models.two_level_fcnet import MODEL_CONFIGS as TFCN_CONFIGS
 from ray.rllib.models.action_dist import Reshaper
 
 # TODO(cathywu) support more network types
