@@ -34,8 +34,8 @@ class MultiAgentFullyConnectedNetwork(Model):
         hiddens = custom_options.get("multiagent_fcnet_hiddens",
                                      [[256, 256]]*1)
 
-        network_cls = globals()[custom_options["network_type"]]
-        SUBMODEL_CONFIGS = MODEL_CONFIGS[custom_options["network_type"]]
+        network_cls = globals()[custom_options.get("network_type", "FullyConnectedNetwork")]
+        SUBMODEL_CONFIGS = MODEL_CONFIGS[custom_options.get("network_type", "FullyConnectedNetwork")]
 
         # check for a shared model
         shared_model = custom_options.get("multiagent_shared_model", 0)
