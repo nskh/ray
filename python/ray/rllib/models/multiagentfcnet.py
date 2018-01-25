@@ -29,7 +29,7 @@ class MultiAgentFullyConnectedNetwork(Model):
         num_actions = output_reshaper.split_number(num_outputs)
 
         custom_options = options["custom_options"]
-        hiddens = custom_options.get("multiagent_fcnet_hiddens",
+        hiddens = custom_options.get("multiagent_hiddens",
                                      [[256, 256]] * 1)
 
         network_cls = globals()[custom_options.get("network_type", "FullyConnectedNetwork")]
@@ -40,17 +40,17 @@ class MultiAgentFullyConnectedNetwork(Model):
         reuse = tf.AUTO_REUSE if shared_model else False
         outputs = []
         for i in range(len(hiddens)):
-          with tf.variable_scope("multi{}".format(i), reuse=reuse):
-            sub_options = options.copy()
-            for c in submodel_configs:
-              if c in options:
-                sub_options.update({c: options[c]})
-              if c in custom_options:
-                sub_options.update({c: custom_options[c]})
-            # sub_options.update({"fcnet_hiddens": hiddens[i]})
-            fcnet = network_cls(split_inputs[i], int(num_actions[i]),
-                                sub_options)
-            output = fcnet.outputs
-            outputs.append(output)
+            with tf.variable_scope("multi{}".format(i), reuse=reuse):
+                sub_options = options.copy()
+                for c in submodel_configs:
+                    if c in options:
+                        sub_options.update({c: options[c]})
+                    if c in custom_options:
+                        sub_options.update({c: custom_options[c]})
+                sub_options.update({"fcnet_hiddens": hiddens[i]})
+                fcnet = network_cls(split_inputs[i], int(num_actions[i]),
+                                    sub_options)
+                output = fcnet.outputs
+                outputs.append(output)
         overall_output = tf.concat(outputs, axis=1)
         return overall_output, outputs
