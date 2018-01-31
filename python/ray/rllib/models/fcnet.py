@@ -8,6 +8,12 @@ import tensorflow.contrib.slim as slim
 from ray.rllib.models.model import Model
 from ray.rllib.models.misc import normc_initializer
 
+MODEL_CONFIGS = [
+    # === Required options ===
+    "fcnet_hiddens",  # Number of hidden layers
+    # === Other options ===
+    "fcnet_activation",  # Activation type
+]
 
 class FullyConnectedNetwork(Model):
     """Generic fully connected network."""

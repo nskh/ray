@@ -16,6 +16,7 @@ from ray.rllib.models.preprocessors import get_preprocessor
 from ray.rllib.models.fcnet import FullyConnectedNetwork
 from ray.rllib.models.visionnet import VisionNetwork
 from ray.rllib.models.multiagentfcnet import MultiAgentFullyConnectedNetwork
+from ray.rllib.models.two_level_fcnet import TwoLevelFCNetwork
 
 
 MODEL_CONFIGS = [
@@ -137,12 +138,17 @@ class ModelCatalog(object):
 
         # num_outputs > 1 used to avoid hitting this with the value function
         if isinstance(options.get("custom_options", {}).get(
-          "multiagent_fcnet_hiddens", 1), list) and num_outputs > 1:
+          "multiagent_hiddens", 1), list) and num_outputs > 1:
             return MultiAgentFullyConnectedNetwork(inputs,
                                                    num_outputs, options)
 
         if obs_rank > 1:
             return VisionNetwork(inputs, num_outputs, options)
+
+        # Use two-level network if the hidden sizes are a nested list
+        if "hierarchical_fcnet_hiddens" in options.get("custom_options",
+                                                       {}) and num_outputs > 1:
+            return TwoLevelFCNetwork(inputs, num_outputs, options)
 
         return FullyConnectedNetwork(inputs, num_outputs, options)
 
