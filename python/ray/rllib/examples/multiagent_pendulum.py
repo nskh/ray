@@ -45,7 +45,7 @@ if __name__ == '__main__':
     config["gamma"] = 0.999
     config["horizon"] = horizon
     config["use_gae"] = True
-    config["model"].update({"fcnet_hiddens": [256, 256]})
+    config["model"].update({"fcnet_hiddens": [256, 256]}) # sets the shape of the value function
     options = {"multiagent_obs_shapes": [3, 3],
                "multiagent_act_shapes": [1, 1],
                "multiagent_shared_model": True,
