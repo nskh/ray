@@ -37,13 +37,15 @@ class MultiAgentFullyConnectedNetwork(Model):
 
         # check for a shared model
         shared_model = custom_options.get("multiagent_shared_model", 0)
-        shared_model = shared_model or isinstance(shared_model, list) # for multiple shared models
-        shared_model_list = custom_options.get("multiagent_shared_model", 0) # how many models should be shared
-        shared_model_list = shared_model_list if isinstance(shared_model_list, list) else [len(hiddens)]
+        shared_model = shared_model or isinstance(shared_model, list) # for heterogeneous shared models
+        # the list contains how many agents share each model
+        shared_model_list = custom_options.get("multiagent_shared_model", [len(hiddens)])
 
         reuse = tf.AUTO_REUSE if shared_model else False
         outputs = []
+        # keeps track of how many models we have set shared so far
         model_counter = 0
+        # keeps track of whether to move onto the next set of shared models
         scope_counter = 0
         for i in range(len(hiddens)):
             # change the scope when we're on a new shared model
