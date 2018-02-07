@@ -42,7 +42,11 @@ class MultiAgentFullyConnectedNetwork(Model):
         shared_model = shared_model or isinstance(shared_model, list)  # for heterogeneous shared models
         # the list indicates how many agents should share each model i.e.
         # list [k1, k2, ...] indicates that first k1 agents share a model, then k2 share a model, etc.
-        shared_model_list = shared_model if isinstance(shared_model, list) else [len(hiddens)]
+        # Users can pass either True/False or a list
+        if isinstance(custom_options.get("multiagent_shared_model", 0), list):
+            shared_model_list = custom_options.get("multiagent_shared_model", 0)
+        else:
+            shared_model_list = [len(hiddens)]
 
         reuse = tf.AUTO_REUSE if shared_model else False
         outputs = []
