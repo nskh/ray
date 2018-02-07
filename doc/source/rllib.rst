@@ -8,7 +8,7 @@ Ray RLlib is a reinforcement learning library that aims to provide both performa
     - Pluggable distributed RL execution strategies
 
 - Composability
-    - Integration with the `Ray.tune <tune.html>`__ hyperparam tuning tool
+    - Integration with the `Ray Tune <tune.html>`__ hyperparam tuning tool
     - Support for multiple frameworks (TensorFlow, PyTorch)
     - Scalable primitives for developing new algorithms
     - Shared models between algorithms
@@ -56,7 +56,7 @@ be trained, checkpointed, or an action computed.
 
 You can train a simple DQN agent with the following command
 
-::
+.. code-block:: bash
 
     python ray/python/ray/rllib/train.py --run DQN --env CartPole-v0
 
@@ -66,14 +66,14 @@ hyperparameters, a file ``result.json`` which contains a training summary
 for each episode and a TensorBoard file that can be used to visualize
 training process with TensorBoard by running
 
-::
+.. code-block:: bash
 
      tensorboard --logdir=~/ray_results
 
 
 The ``train.py`` script has a number of options you can show by running
 
-::
+.. code-block:: bash
 
     python ray/python/ray/rllib/train.py --help
 
@@ -93,7 +93,10 @@ Each algorithm has specific hyperparameters that can be set with ``--config`` - 
 `DQN <https://github.com/ray-project/ray/blob/master/python/ray/rllib/dqn/dqn.py>`__.
 
 In an example below, we train A3C by specifying 8 workers through the config flag.
-::
+function that creates the env to refer to it by name. The contents of the env_config agent config field will be passed to that function to allow the environment to be configured. The return type should be an OpenAI gym.Env. For example:
+
+
+.. code-block:: bash
 
     python ray/python/ray/rllib/train.py --env=PongDeterministic-v4 \
         --run=A3C --config '{"num_workers": 8}'
@@ -108,7 +111,7 @@ when running ``train.py``.
 
 An example of evaluating a previously trained DQN agent is as follows:
 
-::
+.. code-block:: bash
 
     python ray/python/ray/rllib/eval.py \
           ~/ray_results/default/DQN_CartPole-v0_0upjmdgr0/checkpoint-1 \
@@ -134,7 +137,7 @@ The Python API provides the needed flexibility for applying RLlib to new problem
 
 Here is an example of the basic usage:
 
-::
+.. code-block:: python
 
     import ray
     import ray.rllib.ppo as ppo
@@ -171,15 +174,18 @@ Custom Environments
 To train against a custom environment, i.e. one not in the gym catalog, you
 can register a function that creates the env to refer to it by name. The contents of the
 ``env_config`` agent config field will be passed to that function to allow the
-environment to be configured. For example:
+environment to be configured. The return type should be an `OpenAI gym.Env <https://github.com/openai/gym/blob/master/gym/core.py>`__. For example:
 
-::
+.. code-block:: python
 
     import ray
     from ray.tune.registry import register_env
     from ray.rllib import ppo
 
-    env_creator = lambda env_config: MyCustomEnv(env_config)
+    def env_creator(env_config):
+        import gym
+        return gym.make("CartPole-v0")  # or return your own custom env
+
     env_creator_name = "custom_env"
     register_env(env_creator_name, env_creator)
 
@@ -188,17 +194,19 @@ environment to be configured. For example:
         "env_config": {},  # config to pass to env creator
     })
 
+For a code example of a custom env, see the `SimpleCorridor example <https://github.com/ray-project/ray/blob/master/examples/custom_env/custom_env.py>`__. For a more complex example, also see the `Carla RLlib env <https://github.com/ray-project/ray/blob/master/examples/carla/env.py>`__.
+
 Custom Preprocessors and Models
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 RLlib includes default preprocessors and models for common gym
 environments, but you can also specify your own as follows. At a high level, your neural
 network model needs to take an input tensor of the preprocessed observation shape and
-output a vector of the size specified in the constructor. The interfaces for 
+output a vector of the size specified in the constructor. The interfaces for
 these custom classes can be found in the
 `RLlib Developer Guide <rllib-dev.html>`__.
 
-::
+.. code-block:: python
 
     import ray
     from ray.rllib.models import ModelCatalog, Model
@@ -237,7 +245,7 @@ External Data API
 *coming soon!*
 
 
-Using RLlib with Ray.tune
+Using RLlib with Ray Tune
 -------------------------
 
 All Agents implemented in RLlib support the
@@ -245,15 +253,16 @@ All Agents implemented in RLlib support the
 
 Here is an example of using the command-line interface with RLlib:
 
-::
+.. code-block:: bash
 
     python ray/python/ray/rllib/train.py -f tuned_examples/cartpole-grid-search-example.yaml
 
 Here is an example using the Python API. The same config passed to ``Agents`` may be placed
 in the ``config`` section of the experiments.
 
-::
+.. code-block:: python
 
+    import ray
     from ray.tune.tune import run_experiments
     from ray.tune.variant_generator import grid_search
 
@@ -278,9 +287,8 @@ in the ``config`` section of the experiments.
         # put additional experiments to run concurrently here
     }
 
+    ray.init()
     run_experiments(experiment)
-
-.. _`managing a cluster with parallel ssh`: using-ray-on-a-large-cluster.html
 
 Contributing to RLlib
 ---------------------

@@ -32,15 +32,32 @@ class MultiAgentFullyConnectedNetwork(Model):
         hiddens = custom_options.get("multiagent_hiddens",
                                      [[256, 256]] * 1)
 
-        network_cls = globals()[custom_options.get("network_type", "FullyConnectedNetwork")]
-        submodel_configs = SUBMODEL_CONFIGS[custom_options.get("network_type", "FullyConnectedNetwork")]
+        network_cls = globals()[custom_options.get("network_type",
+                                                   "FullyConnectedNetwork")]
+        submodel_configs = SUBMODEL_CONFIGS[custom_options.get("network_type",
+                                                               "FullyConnectedNetwork")]
 
         # check for a shared model
         shared_model = custom_options.get("multiagent_shared_model", 0)
+        shared_model = shared_model or isinstance(shared_model, list)  # for heterogeneous shared models
+        # the list indicates how many agents should share each model i.e.
+        # list [k1, k2, ...] indicates that first k1 agents share a model, then k2 share a model, etc.
+        shared_model_list = custom_options.get("multiagent_shared_model", [len(hiddens)])
+
         reuse = tf.AUTO_REUSE if shared_model else False
         outputs = []
+        # keeps track of how many models we have set as shared so far
+        model_counter = 0
+        # keeps track of whether to move onto the next set of shared models
+        scope_counter = 0
         for i in range(len(hiddens)):
-            with tf.variable_scope("multi{}".format(i), reuse=reuse):
+            # change the scope when we're on a new shared model
+            scope = "multi{}".format(scope_counter) if shared_model else "multi{}".format(i)
+            model_counter += 1
+            if model_counter >= shared_model_list[scope_counter]:
+                scope_counter += 1
+                model_counter = 0
+            with tf.variable_scope(scope, reuse=reuse):
                 sub_options = options.copy()
                 for c in submodel_configs:
                     if c in options:
