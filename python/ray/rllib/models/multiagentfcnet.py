@@ -38,7 +38,7 @@ class MultiAgentFullyConnectedNetwork(Model):
                                                                "FullyConnectedNetwork")]
 
         # check for a shared model
-        shared_model = custom_options.get("multiagent_shared_model", 0)
+        shared_model = custom_options.get("is_shared_model", 0)
         # the list indicates how many agents should share each model i.e.
         # list [k1, k2, ...] indicates that first k1 agents share a model, then k2 share a model, etc.
         shared_model_list = custom_options.get("shared_model_list", [len(hiddens)])
