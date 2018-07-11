@@ -179,11 +179,18 @@ class PPOEvaluator(PolicyEvaluator):
         objs = pickle.loads(objs)
         self.sync_filters(objs["filters"])
 
-    def get_weights(self):
-        return self.variables.get_weights()
+    def get_weights(self, flat=False):
+        if flat:
+            return self.variables.get_flat()
+        else:
+            return self.variables.get_weights()
 
-    def set_weights(self, weights):
-        self.variables.set_weights(weights)
+    def set_weights(self, weights, flat=False):
+        if flat:
+            self.variables.set_flat(weights)
+        else:
+            self.variables.set_weights(weights)
+
 
     def sample(self):
         """Returns experience samples from this Evaluator. Observation

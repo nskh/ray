@@ -76,7 +76,7 @@ class LocalSyncParallelOptimizer(object):
             self._towers.append(self._setup_device(device,
                                                    device_placeholders))
 
-        avg = average_gradients([t.grads for t in self._towers])
+        avg = average_gradients([t.grads for t in self._towers])  # TODO(nskh) grab this
         if grad_norm_clipping:
             for i, (grad, var) in enumerate(avg):
                 if grad is not None:
