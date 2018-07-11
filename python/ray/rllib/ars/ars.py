@@ -333,6 +333,8 @@ class ARSAgent(agent.Agent):
 
         t1 = time.time()
         # aggregate rollouts to form the gradient used to compute SGD step
+
+        # reward_diff is vector of positive diff reward minus negative diff reward
         reward_diff = rollout_rewards[:, 0] - rollout_rewards[:, 1]
         deltas_tuple = (self.deltas.get(idx, self.w_policy.size)
                         for idx in deltas_idx)
