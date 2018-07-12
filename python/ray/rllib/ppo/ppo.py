@@ -167,7 +167,6 @@ class PPOAgent(Agent):
 
         rollouts_end = time.time()
 
-        # TODO(nskh) collect g_hats somehow
         print('Computing empirical gradient')
         g_hat, info_dict = self.aggregate_rollouts()
 
