@@ -81,6 +81,7 @@ class LocalSyncParallelOptimizer(object):
             for i, (grad, var) in enumerate(avg):
                 if grad is not None:
                     avg[i] = (tf.clip_by_norm(grad, grad_norm_clipping), var)
+        self.avg_gradient = avg
         self._train_op = self.optimizer.apply_gradients(avg)
 
     def load_data(self, sess, inputs, full_trace=False):

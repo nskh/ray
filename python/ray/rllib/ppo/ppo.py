@@ -263,6 +263,10 @@ class PPOAgent(Agent):
             "sample_throughput": len(samples["obs"]) / sgd_time
         }
 
+        g_samp = self.local_evaluator.par_opt.avg_gradient
+        info['g_samp'] = g_samp
+        info['g_hat'] = g_hat
+
         FilterManager.synchronize(
             self.local_evaluator.filters, self.remote_evaluators)
         res = self._fetch_metrics_from_remote_evaluators()
@@ -337,12 +341,8 @@ class PPOAgent(Agent):
         else:
             num_deltas = num_rollouts
 
-        # TODO(nskh): figure out how to grab and set these weights
-        # refresh weights
+        # fetch weights
         flat_weights = self.local_evaluator.get_weights(flat=True)
-        # how do you modify remote evaluators? do i need to?
-        # for re in self.remote_evaluators:
-        #     re.get_weights()
 
         # put policy weights in the object store
         policy_id = ray.put(flat_weights)
@@ -507,7 +507,7 @@ class Worker(object):
                     pass
 
                 # compute reward and number of timesteps used f
-                # or negative pertubation rollout
+                # or negative perturbation rollout
                 self.policy.set_weights(w_policy - delta, flat=True)
                 if not sample:
                     neg_reward, neg_steps = self.rollout(shift=shift)
