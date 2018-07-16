@@ -14,9 +14,11 @@ import ray
 from ray.rllib.es import utils
 from ray.tune.result import TrainingResult
 from ray.rllib.agent import Agent
-from ray.rllib.utils import FilterManager
+from ray.rllib.models import ModelCatalog
+from ray.rllib.ppo.loss import ProximalPolicyLoss
 from ray.rllib.ppo.ppo_evaluator import PPOEvaluator
 from ray.rllib.ppo.rollout import collect_samples
+from ray.rllib.utils import FilterManager
 
 
 DEFAULT_CONFIG = {
@@ -117,9 +119,7 @@ class PPOAgent(Agent):
                 True)
             for _ in range(self.config["num_workers"])]
 
-        self.w_policy = self.local_evaluator.get_weights()
-        print(self.w_policy.shape)
-        self.num_deltas = self.w_policy.size  # number of perturbation directions
+        self.num_deltas = self.local_evaluator.get_weights(flat=True).size  # number of perturbation directions
 
         self.start_time = time.time()
         if self.config["write_logs"]:
@@ -131,11 +131,14 @@ class PPOAgent(Agent):
 
         # Create the actors for ARS setup - nskh
         print("Creating actors.")
+
+        # actual set of workers
+        # import ipdb; ipdb.set_trace()
         self.workers = [
             Worker.remote(
                 self.registry, self.config, self.env_creator,
                 ENV_SEED + 7 * i,
-                evaluator=self.local_evaluator)
+                self.kl_coeff)
             for i in range(self.config["num_workers"])]
 
     def _train(self):
@@ -262,8 +265,11 @@ class PPOAgent(Agent):
             "sample_throughput": len(samples["obs"]) / sgd_time
         }
 
+        # processing g_samp
         g_samp = self.local_evaluator.par_opt.avg_gradient
-        info['g_samp'] = g_samp
+        proc = np.vstack([val[1].eval(self.local_evaluator.sess)
+                          for val in g_samp[:6]])  # TODO(nskh) fix hardcoding
+        info['g_samp'] = proc
         info['g_hat'] = g_hat
 
         FilterManager.synchronize(
@@ -420,27 +426,53 @@ class Worker(object):
     """
 
     def __init__(self, registry, config, env_creator,
-                 env_seed,
-                 evaluator=None):
+                 env_seed, kl_coeff):
 
         # initialize OpenAI environment for each worker
         self.env = env_creator(config["env_config"])
         self.env.seed(env_seed)
 
-        from ray.rllib import models
-        self.preprocessor = models.ModelCatalog.get_preprocessor(
-            registry, self.env)
+        self.config = config
 
         from ray.rllib import models
         self.preprocessor = models.ModelCatalog.get_preprocessor(
             registry, self.env)
 
-        self.rollout_length = self.env.spec.max_episode_steps,
+        from ray.rllib import models
+        self.preprocessor = models.ModelCatalog.get_preprocessor(
+            registry, self.env)
+
+        self.rollout_length = self.env.spec.max_episode_steps
         self.sess = utils.make_session(single_threaded=True)
-        if evaluator is not None:
-            self.evaluator = evaluator
-            self.policy = evaluator.common_policy
-            # self.env = evaluator.env  # should be unnecessary
+
+        # The input observations.
+        self.observations = tf.placeholder(
+            tf.float32, shape=(None,) + self.env.observation_space.shape)
+        # Targets of the value function.
+        self.value_targets = tf.placeholder(tf.float32, shape=(None,))
+        # Advantage values in the policy gradient estimator.
+        self.advantages = tf.placeholder(tf.float32, shape=(None,))
+
+        action_space = self.env.action_space
+        self.actions = ModelCatalog.get_action_placeholder(action_space)
+        self.distribution_class, self.logit_dim = ModelCatalog.get_action_dist(
+            action_space)
+        # Log probabilities from the policy before the policy update.
+        self.prev_logits = tf.placeholder(
+            tf.float32, shape=(None, self.logit_dim))
+        # Value function predictions before the policy update.
+        self.prev_vf_preds = tf.placeholder(tf.float32, shape=(None,))
+
+        self.policy = ProximalPolicyLoss(self.env.observation_space, self.env.action_space,
+                                         self.observations, self.value_targets, self.advantages,
+                                         self.actions, self.prev_logits, self.prev_vf_preds, self.logit_dim,
+                                         kl_coeff, self.distribution_class, self.config,
+                                         self.sess, registry)
+
+        self.variables = ray.experimental.TensorFlowVariables(
+            self.policy.loss, self.sess)
+
+        print('worker instantiated!')
 
     def rollout(self, shift=0., rollout_length=None):
         """
@@ -458,6 +490,8 @@ class Worker(object):
         for i in range(rollout_length):
             # print('observation before acting is', ob)
             action = self.policy.compute(ob)
+            if type(action) is tuple:
+                action = action[0]  # otherwise it's a tuple
             ob, reward, done, _ = self.env.step(action)
             steps += 1
             total_reward += (reward - shift)
@@ -477,9 +511,10 @@ class Worker(object):
 
         # TODO(nskh) verify policy shape
         num_weights = w_policy.size
+        print('perturbing', num_weights, 'weights and rolling out policies.')
         for i in range(num_weights):
             if evaluate:
-                self.policy.set_weights(w_policy, flat=True)
+                self.variables.set_flat(w_policy)
                 deltas_idx.append(-1)
 
                 # for evaluation we do not shift the rewards (shift = 0)
@@ -497,7 +532,7 @@ class Worker(object):
 
                 # compute reward and number of timesteps used
                 # for positive perturbation rollout
-                self.policy.set_weights(w_policy + delta, flat=True)
+                self.variables.set_flat(w_policy + delta)
                 if not sample:
                     pos_reward, pos_steps = self.rollout(shift=shift)
                 else:
@@ -507,7 +542,7 @@ class Worker(object):
 
                 # compute reward and number of timesteps used f
                 # or negative perturbation rollout
-                self.policy.set_weights(w_policy - delta, flat=True)
+                self.variables.set_flat(w_policy - delta)
                 if not sample:
                     neg_reward, neg_steps = self.rollout(shift=shift)
                 else:
