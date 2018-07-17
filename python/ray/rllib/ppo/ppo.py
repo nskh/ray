@@ -133,7 +133,6 @@ class PPOAgent(Agent):
         print("Creating actors.")
 
         # actual set of workers
-        # import ipdb; ipdb.set_trace()
         self.workers = [
             Worker.remote(
                 self.registry, self.config, self.env_creator,
@@ -267,10 +266,14 @@ class PPOAgent(Agent):
 
         # processing g_samp
         g_samp = self.local_evaluator.par_opt.avg_gradient
+
+        import ipdb
+        ipdb.set_trace()
+
         proc = np.vstack([val[1].eval(self.local_evaluator.sess)
                           for val in g_samp[:6]])  # TODO(nskh) fix hardcoding
-        info['g_samp'] = proc
-        info['g_hat'] = g_hat
+        # info['g_samp'] = proc
+        # info['g_hat'] = g_hat
 
         FilterManager.synchronize(
             self.local_evaluator.filters, self.remote_evaluators)
@@ -411,14 +414,12 @@ class PPOAgent(Agent):
         g_hat, count = utils.batched_weighted_sum(reward_diff, deltas_tuple,
                                                   batch_size=500)
 
-        # TODO(nskh): why does this division occur?
         g_hat /= deltas_idx.size
         t2 = time.time()
         print('time to aggregate rollouts', t2 - t1)
         return g_hat, info_dict
 
 
-# TODO(nskh): should workers actually be remote_evaluators? how hard would this be
 @ray.remote
 class Worker(object):
     """
@@ -472,7 +473,20 @@ class Worker(object):
         self.variables = ray.experimental.TensorFlowVariables(
             self.policy.loss, self.sess)
 
-        print('worker instantiated!')
+        # dummy weights to use later
+        self.variables.set_flat(np.zeros(self.variables.get_flat_size()))
+
+        # build index set of variables we want to estimate
+        self.weight_index_set = set()
+        idx = 0
+        for k,v in self.variables.get_weights().items():
+            if 'value' not in k:
+                for j in range(idx, idx+v.size):
+                    self.weight_index_set.add(j)
+            idx += v.size
+
+        import ipdb
+        ipdb.set_trace()
 
     def rollout(self, shift=0., rollout_length=None):
         """
@@ -500,18 +514,16 @@ class Worker(object):
 
         return total_reward, steps
 
-    def do_rollouts(self, w_policy, shift=1, evaluate=False, sample=False):
+    def do_rollouts(self, w_policy, shift=0., evaluate=False, sample=False):
         """
         Generate multiple rollouts with a policy parametrized by w_policy.
         """
 
         rollout_rewards, steps, deltas_idx = [], [], []
 
-        # TODO(nskh) fix loop iteration number
-
-        # TODO(nskh) verify policy shape
         num_weights = w_policy.size
         print('perturbing', num_weights, 'weights and rolling out policies.')
+
         for i in range(num_weights):
             if evaluate:
                 self.variables.set_flat(w_policy)
@@ -526,7 +538,6 @@ class Worker(object):
                 rollout_rewards.append(reward)
 
             else:
-                # TODO(nskh) verify policy shape
                 delta = make_elementary_vector(i, w_policy.shape)
                 deltas_idx.append(i)
 
@@ -560,6 +571,5 @@ class Worker(object):
 
 def make_elementary_vector(idx, shape, step_size=1.0):
     vec = np.zeros(shape)
-    # TODO(nskh) verify size of policy shape
     vec[idx] = 1.0*step_size  # TODO(nskh) modularize perturbation size
     return vec
