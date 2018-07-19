@@ -89,6 +89,7 @@ DEFAULT_CONFIG = {
 }
 
 ENV_SEED = 123
+DELTA_SIZE = 0.01
 
 
 class PPOAgent(Agent):
@@ -139,6 +140,8 @@ class PPOAgent(Agent):
                 ENV_SEED + 7 * i,
                 self.kl_coeff)
             for i in range(self.config["num_workers"])]
+
+        self.grads = list()
 
     def _train(self):
         agents = self.remote_evaluators
@@ -267,13 +270,14 @@ class PPOAgent(Agent):
         # processing g_samp
         g_samp = self.local_evaluator.par_opt.avg_gradient
 
-        import ipdb
-        ipdb.set_trace()
+        proc = np.concatenate([val[1].eval(self.local_evaluator.sess).flatten()
+                               for val in g_samp
+                               if 'value' not in val[1].name])
 
-        proc = np.vstack([val[1].eval(self.local_evaluator.sess)
-                          for val in g_samp[:6]])  # TODO(nskh) fix hardcoding
-        # info['g_samp'] = proc
-        # info['g_hat'] = g_hat
+        self.grads.append({'g_samp': proc, 'g_hat': g_hat})
+
+        with open(self.logdir + '/grads.pkl', 'wb') as file:
+            pickle.dump(self.grads, file)
 
         FilterManager.synchronize(
             self.local_evaluator.filters, self.remote_evaluators)
@@ -408,11 +412,13 @@ class PPOAgent(Agent):
         # reward_diff is vector of positive diff reward minus negative diff reward
         reward_diff = rollout_rewards[:, 0] - rollout_rewards[:, 1]
 
-        deltas_tuple = (make_elementary_vector(idx, flat_weights.shape) for idx in deltas_idx)
+        deltas_tuple = np.array([make_elementary_vector(idx, flat_weights.shape, DELTA_SIZE)
+                                 for idx in deltas_idx])
 
-        # this should be fine - nskh
-        g_hat, count = utils.batched_weighted_sum(reward_diff, deltas_tuple,
-                                                  batch_size=500)
+        # TODO(nskh) verify this works
+        # this yields a big gradient, 5000x the output of batched_weighted_sum
+        # could replace with batched_weighted_sum / (2 * norm(delta)**2)
+        g_hat = finite_difference(reward_diff, deltas_tuple)
 
         g_hat /= deltas_idx.size
         t2 = time.time()
@@ -474,19 +480,19 @@ class Worker(object):
             self.policy.loss, self.sess)
 
         # dummy weights to use later
-        self.variables.set_flat(np.zeros(self.variables.get_flat_size()))
+        self.variables.set_flat(np.arange(self.variables.get_flat_size()))
 
         # build index set of variables we want to estimate
-        self.weight_index_set = set()
-        idx = 0
-        for k,v in self.variables.get_weights().items():
-            if 'value' not in k:
-                for j in range(idx, idx+v.size):
-                    self.weight_index_set.add(j)
-            idx += v.size
-
-        import ipdb
-        ipdb.set_trace()
+        # weights+biases for the policy as well as value function are encoded
+        # the policy params are first, so we total how many exist
+        # TODO(nskh) try the other way based on neural net size
+        self.num_weights = sum([v.size
+                           for k, v in self.variables.get_weights().items()
+                           if 'value' not in k])
+        # self.net_indices = np.concatenate([v.flatten()
+        #                                    for k,v in self.variables.get_weights().items()
+        #                                    if 'value' not in k])
+        # assert(set(range(self.num_weights)) == set(self.net_indices))
 
     def rollout(self, shift=0., rollout_length=None):
         """
@@ -521,10 +527,9 @@ class Worker(object):
 
         rollout_rewards, steps, deltas_idx = [], [], []
 
-        num_weights = w_policy.size
-        print('perturbing', num_weights, 'weights and rolling out policies.')
+        print('perturbing', self.num_weights, 'weights and rolling out policies.')
 
-        for i in range(num_weights):
+        for i in range(self.num_weights):
             if evaluate:
                 self.variables.set_flat(w_policy)
                 deltas_idx.append(-1)
@@ -538,7 +543,7 @@ class Worker(object):
                 rollout_rewards.append(reward)
 
             else:
-                delta = make_elementary_vector(i, w_policy.shape)
+                delta = make_elementary_vector(i, w_policy.shape, DELTA_SIZE)
                 deltas_idx.append(i)
 
                 # compute reward and number of timesteps used
@@ -566,10 +571,19 @@ class Worker(object):
 
         return {'deltas_idx': deltas_idx,
                 'rollout_rewards': rollout_rewards,
-                "steps": steps}
+                "steps": steps,
+                'num_weights': self.num_weights}
 
 
-def make_elementary_vector(idx, shape, step_size=1.0):
+def make_elementary_vector(idx, shape, step_size=0.01):
     vec = np.zeros(shape)
-    vec[idx] = 1.0*step_size  # TODO(nskh) modularize perturbation size
+    vec[idx] = 1.0*step_size
     return vec
+
+
+def finite_difference(reward_diff, deltas):
+    grad = np.zeros(deltas.shape[1])
+    for i in range(len(reward_diff)):
+        grad += reward_diff[i] / (2*np.linalg.norm(deltas[i, :])**2) * deltas[i,:]
+    grad = grad[:len(reward_diff)]
+    return grad
