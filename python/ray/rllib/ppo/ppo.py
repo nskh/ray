@@ -120,7 +120,7 @@ class PPOAgent(Agent):
                 True)
             for _ in range(self.config["num_workers"])]
 
-        self.num_deltas = self.local_evaluator.get_weights(flat=True).size  # number of perturbation directions
+        self.num_deltas = self.local_evaluator.num_fc_weights  # number of perturbation directions
 
         self.start_time = time.time()
         if self.config["write_logs"]:
@@ -134,12 +134,13 @@ class PPOAgent(Agent):
         print("Creating actors.")
 
         # actual set of workers
+        self.num_workers = self.config['num_workers']
         self.workers = [
             Worker.remote(
                 self.registry, self.config, self.env_creator,
                 ENV_SEED + 7 * i,
                 self.kl_coeff)
-            for i in range(self.config["num_workers"])]
+            for i in range(self.num_workers)]
 
         self.grads = list()
 
@@ -360,17 +361,24 @@ class PPOAgent(Agent):
         policy_id = ray.put(flat_weights)
 
         t1 = time.time()
+        num_rollouts = int(num_deltas / self.num_workers)
 
         # parallel generation of rollouts
         rollout_ids_one = [worker.do_rollouts.remote(policy_id,
+                                                     delta_idx,
+                                                     num_rollouts=num_rollouts,
                                                      evaluate=evaluate)
-                           for worker in self.workers]
+                           for delta_idx, worker in enumerate(self.workers)]
 
-        remainder_workers = self.workers[:(num_deltas % self.config["num_workers"])]
+        remainder_workers = self.workers[:(num_deltas % self.num_workers)]
+        remainder_idx_start = int(num_deltas / self.num_workers) * self.num_workers
+        remainder_indices = range(remainder_idx_start, remainder_idx_start + len(remainder_workers))
         # handle the remainder of num_delta/num_workers
         rollout_ids_two = [worker.do_rollouts.remote(policy_id,
+                                                     delta_idx,
+                                                     num_rollouts=1,
                                                      evaluate=evaluate)
-                           for worker in remainder_workers]
+                           for delta_idx, worker in zip(remainder_indices, remainder_workers)]
 
         # gather results
         results_one = ray.get(rollout_ids_one)
@@ -395,7 +403,7 @@ class PPOAgent(Agent):
         info_dict = {'deltas_idx': deltas_idx,
                      'rollout_rewards': rollout_rewards,
                      'steps': steps}
-        deltas_idx = np.array(deltas_idx)  # probably unnecessary - nskh
+        deltas_idx = np.array(deltas_idx)
         rollout_rewards = np.array(rollout_rewards, dtype=np.float64)
 
         t2 = time.time()
@@ -520,16 +528,18 @@ class Worker(object):
 
         return total_reward, steps
 
-    def do_rollouts(self, w_policy, shift=0., evaluate=False, sample=False):
+    def do_rollouts(self, w_policy, worker_idx, num_rollouts=1, shift=0., evaluate=False, sample=False):
         """
         Generate multiple rollouts with a policy parametrized by w_policy.
         """
 
         rollout_rewards, steps, deltas_idx = [], [], []
 
-        print('perturbing', self.num_weights, 'weights and rolling out policies.')
+        delta_idx = worker_idx * num_rollouts
 
-        for i in range(self.num_weights):
+        print('worker', worker_idx, 'perturbing', num_rollouts, 'weights, starting at weight', delta_idx, 'and rolling out policies.')
+
+        for i in range(delta_idx, delta_idx+num_rollouts):
             if evaluate:
                 self.variables.set_flat(w_policy)
                 deltas_idx.append(-1)
@@ -571,8 +581,7 @@ class Worker(object):
 
         return {'deltas_idx': deltas_idx,
                 'rollout_rewards': rollout_rewards,
-                "steps": steps,
-                'num_weights': self.num_weights}
+                "steps": steps}
 
 
 def make_elementary_vector(idx, shape, step_size=0.01):
