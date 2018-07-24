@@ -6,10 +6,10 @@ cartpole-ppo:
         time_total_s: 600
     trial_resources:
         cpu: 1
-        extra_cpu: 3
+        extra_cpu: 0
     config:
         timesteps_per_batch: 2048
-        num_workers: 4
+        num_workers: 1
         lambda: 0.95
         gamma: 0.95
         sgd_stepsize: 0.0003

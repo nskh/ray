@@ -413,6 +413,9 @@ class PPOAgent(Agent):
         if evaluate:
             return rollout_rewards
 
+        # normalize rewards by their standard deviation
+        rollout_rewards /= np.std(rollout_rewards)
+
         t1 = time.time()
 
         # aggregate rollouts to form the gradient used to compute SGD step

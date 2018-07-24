@@ -4,14 +4,14 @@ pendulum-ppo:
     run: PPO
     trial_resources:
         cpu: 1
-        extra_cpu: 3
+        extra_cpu: 1
     config:
         timesteps_per_batch: 2048
-        num_workers: 4
+        num_workers: 2
         lambda: 0.95
         gamma: 0.95
         sgd_stepsize: 0.0003
-        sgd_batchsize: 64
+        sgd_batchsize: 2048
         num_sgd_iter: 10
         model:
-            fcnet_hiddens: [4, 4]
+            fcnet_hiddens: [64, 64]

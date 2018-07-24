@@ -1,12 +1,12 @@
-cartpole-es:
+cartpole-ars:
     env: CartPole-v0
-    run: ES
+    run: ARS
     stop:
         episode_reward_mean: 200
-        time_total_s: 300
+#        time_total_s: 600
     trial_resources:
-        cpu: 2
+        cpu: 1
+        extra_cpu: 1
     config:
         num_workers: 2
-        noise_size: 25000000
-        episodes_per_batch: 50
+        policy: MLP

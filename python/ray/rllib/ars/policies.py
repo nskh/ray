@@ -74,6 +74,8 @@ class MLPPolicy(object):
         observation = self.observation_filter(observation[None], update=update)
         action = self.sess.run(self.sampler,
                                feed_dict={self.inputs: observation})
+        if action.size == 1:
+            return action[0]
         return np.reshape(action, -1)
 
     def set_weights(self, x):
