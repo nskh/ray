@@ -11,11 +11,14 @@ import tensorflow as tf
 from tensorflow.python import debug as tf_debug
 
 import ray
+from ray.rllib.es import utils
 from ray.tune.result import TrainingResult
 from ray.rllib.agent import Agent
-from ray.rllib.utils import FilterManager
+from ray.rllib.models import ModelCatalog
+from ray.rllib.ppo.loss import ProximalPolicyLoss
 from ray.rllib.ppo.ppo_evaluator import PPOEvaluator
 from ray.rllib.ppo.rollout import collect_samples
+from ray.rllib.utils import FilterManager
 
 
 DEFAULT_CONFIG = {
@@ -34,8 +37,7 @@ DEFAULT_CONFIG = {
     "num_sgd_iter": 30,
     # Stepsize of SGD
     "sgd_stepsize": 5e-5,
-    # TODO(pcm): Expose the choice between gpus and cpus
-    # as a command line argument.
+    # TODO(pcm): Expose the choice between gpus and cpus as a command line argument.
     "devices": ["/cpu:%d" % i for i in range(4)],
     "tf_session_args": {
         "device_count": {"CPU": 4},
@@ -86,6 +88,9 @@ DEFAULT_CONFIG = {
     "env_config": {},
 }
 
+ENV_SEED = 123
+DELTA_SIZE = 0.01
+
 
 class PPOAgent(Agent):
     _agent_name = "PPO"
@@ -96,13 +101,14 @@ class PPOAgent(Agent):
     def _init(self):
 
         self.shared_model = (self.config["model"].get("custom_options", {}).
-                        get("multiagent_shared_model", False))
+                             get("multiagent_shared_model", False))
         if self.shared_model:
             self.num_models = 1
         else:
             self.num_models = len(self.config["model"].get(
                 "custom_options", {}).get("multiagent_obs_shapes", [1]))
         self.global_step = 0
+        self.timesteps = 0
         self.kl_coeff = [self.config["kl_coeff"]] * self.num_models
         self.local_evaluator = PPOEvaluator(
             self.registry, self.env_creator, self.config, self.logdir, False)
@@ -113,6 +119,9 @@ class PPOAgent(Agent):
                 self.registry, self.env_creator, self.config, self.logdir,
                 True)
             for _ in range(self.config["num_workers"])]
+
+        self.num_deltas = self.local_evaluator.num_fc_weights  # number of perturbation directions
+
         self.start_time = time.time()
         if self.config["write_logs"]:
             self.file_writer = tf.summary.FileWriter(
@@ -120,6 +129,20 @@ class PPOAgent(Agent):
         else:
             self.file_writer = None
         self.saver = tf.train.Saver(max_to_keep=None)
+
+        # Create the actors for ARS setup - nskh
+        print("Creating actors.")
+
+        # actual set of workers
+        self.num_workers = self.config['num_workers']
+        self.workers = [
+            Worker.remote(
+                self.registry, self.config, self.env_creator,
+                ENV_SEED + 7 * i,
+                self.kl_coeff)
+            for i in range(self.num_workers)]
+
+        self.grads = list()
 
     def _train(self):
         agents = self.remote_evaluators
@@ -149,6 +172,10 @@ class PPOAgent(Agent):
         samples.data["advantages"] = standardized(samples["advantages"])
 
         rollouts_end = time.time()
+
+        print('Computing empirical gradient')
+        g_hat, info_dict = self.aggregate_rollouts()
+
         print("Computing policy (iterations=" + str(config["num_sgd_iter"]) +
               ", stepsize=" + str(config["sgd_stepsize"]) + "):")
         names = [
@@ -163,6 +190,7 @@ class PPOAgent(Agent):
         shuffle_time = shuffle_end - rollouts_end
         load_time = load_end - shuffle_end
         sgd_time = 0
+        kl = []
         for i in range(config["num_sgd_iter"]):
             sgd_start = time.time()
             batch_index = 0
@@ -240,6 +268,18 @@ class PPOAgent(Agent):
             "sample_throughput": len(samples["obs"]) / sgd_time
         }
 
+        # processing g_samp
+        g_samp = self.local_evaluator.par_opt.avg_gradient
+
+        proc = np.concatenate([val[1].eval(self.local_evaluator.sess).flatten()
+                               for val in g_samp
+                               if 'value' not in val[1].name])
+
+        self.grads.append({'g_samp': proc, 'g_hat': g_hat})
+
+        with open(self.logdir + '/grads.pkl', 'wb') as file:
+            pickle.dump(self.grads, file)
+
         FilterManager.synchronize(
             self.local_evaluator.filters, self.remote_evaluators)
         res = self._fetch_metrics_from_remote_evaluators()
@@ -302,3 +342,260 @@ class PPOAgent(Agent):
         observation = self.local_evaluator.obs_filter(
             observation, update=False)
         return self.local_evaluator.common_policy.compute(observation)[0]
+
+    # FIXME(ev) should return the rewards and some other statistics
+    def aggregate_rollouts(self, num_rollouts=None, evaluate=False):
+        """
+        Aggregate update step from rollouts generated in parallel.
+        """
+
+        if num_rollouts is None:
+            num_deltas = self.num_deltas
+        else:
+            num_deltas = num_rollouts
+
+        # fetch weights
+        flat_weights = self.local_evaluator.get_weights(flat=True)
+
+        # put policy weights in the object store
+        policy_id = ray.put(flat_weights)
+
+        t1 = time.time()
+        num_rollouts = int(num_deltas / self.num_workers)
+
+        # parallel generation of rollouts
+        rollout_ids_one = [worker.do_rollouts.remote(policy_id,
+                                                     delta_idx,
+                                                     num_rollouts=num_rollouts,
+                                                     evaluate=evaluate)
+                           for delta_idx, worker in enumerate(self.workers)]
+
+        remainder_workers = self.workers[:(num_deltas % self.num_workers)]
+        remainder_idx_start = int(num_deltas / self.num_workers) * self.num_workers
+        remainder_indices = range(remainder_idx_start, remainder_idx_start + len(remainder_workers))
+        # handle the remainder of num_delta/num_workers
+        rollout_ids_two = [worker.do_rollouts.remote(policy_id,
+                                                     delta_idx,
+                                                     num_rollouts=1,
+                                                     evaluate=evaluate)
+                           for delta_idx, worker in zip(remainder_indices, remainder_workers)]
+
+        # gather results
+        results_one = ray.get(rollout_ids_one)
+        results_two = ray.get(rollout_ids_two)
+
+        rollout_rewards, deltas_idx, steps = [], [], []
+
+        for result in results_one:
+            if not evaluate:
+                self.timesteps += np.sum(result["steps"])
+            deltas_idx += result['deltas_idx']
+            rollout_rewards += result['rollout_rewards']
+            steps += [result['steps']]
+
+        for result in results_two:
+            if not evaluate:
+                self.timesteps += np.sum(result["steps"])
+            deltas_idx += result['deltas_idx']
+            rollout_rewards += result['rollout_rewards']
+            steps += [result['steps']]
+
+        info_dict = {'deltas_idx': deltas_idx,
+                     'rollout_rewards': rollout_rewards,
+                     'steps': steps}
+        deltas_idx = np.array(deltas_idx)
+        rollout_rewards = np.array(rollout_rewards, dtype=np.float64)
+
+        t2 = time.time()
+
+        print('Time to generate rollouts:', t2 - t1)
+
+        if evaluate:
+            return rollout_rewards
+
+        # normalize rewards by their standard deviation
+        rollout_rewards /= np.std(rollout_rewards)
+
+        t1 = time.time()
+
+        # aggregate rollouts to form the gradient used to compute SGD step
+
+        # reward_diff is vector of positive diff reward minus negative diff reward
+        reward_diff = rollout_rewards[:, 0] - rollout_rewards[:, 1]
+
+        deltas_tuple = np.array([make_elementary_vector(idx, flat_weights.shape, DELTA_SIZE)
+                                 for idx in deltas_idx])
+
+        # TODO(nskh) verify this works
+        # this yields a big gradient, 5000x the output of batched_weighted_sum
+        # could replace with batched_weighted_sum / (2 * norm(delta)**2)
+        g_hat = finite_difference(reward_diff, deltas_tuple)
+
+        g_hat /= deltas_idx.size
+        t2 = time.time()
+        print('time to aggregate rollouts', t2 - t1)
+        return g_hat, info_dict
+
+
+@ray.remote
+class Worker(object):
+    """
+    Object class for parallel rollout generation.
+    """
+
+    def __init__(self, registry, config, env_creator,
+                 env_seed, kl_coeff):
+
+        # initialize OpenAI environment for each worker
+        self.env = env_creator(config["env_config"])
+        self.env.seed(env_seed)
+
+        self.config = config
+
+        from ray.rllib import models
+        self.preprocessor = models.ModelCatalog.get_preprocessor(
+            registry, self.env)
+
+        from ray.rllib import models
+        self.preprocessor = models.ModelCatalog.get_preprocessor(
+            registry, self.env)
+
+        self.rollout_length = self.env.spec.max_episode_steps
+        self.sess = utils.make_session(single_threaded=True)
+
+        # The input observations.
+        self.observations = tf.placeholder(
+            tf.float32, shape=(None,) + self.env.observation_space.shape)
+        # Targets of the value function.
+        self.value_targets = tf.placeholder(tf.float32, shape=(None,))
+        # Advantage values in the policy gradient estimator.
+        self.advantages = tf.placeholder(tf.float32, shape=(None,))
+
+        action_space = self.env.action_space
+        self.actions = ModelCatalog.get_action_placeholder(action_space)
+        self.distribution_class, self.logit_dim = ModelCatalog.get_action_dist(
+            action_space)
+        # Log probabilities from the policy before the policy update.
+        self.prev_logits = tf.placeholder(
+            tf.float32, shape=(None, self.logit_dim))
+        # Value function predictions before the policy update.
+        self.prev_vf_preds = tf.placeholder(tf.float32, shape=(None,))
+
+        self.policy = ProximalPolicyLoss(self.env.observation_space, self.env.action_space,
+                                         self.observations, self.value_targets, self.advantages,
+                                         self.actions, self.prev_logits, self.prev_vf_preds, self.logit_dim,
+                                         kl_coeff, self.distribution_class, self.config,
+                                         self.sess, registry)
+
+        self.variables = ray.experimental.TensorFlowVariables(
+            self.policy.loss, self.sess)
+
+        # dummy weights to use later
+        self.variables.set_flat(np.arange(self.variables.get_flat_size()))
+
+        # build index set of variables we want to estimate
+        # weights+biases for the policy as well as value function are encoded
+        # the policy params are first, so we total how many exist
+        # TODO(nskh) try the other way based on neural net size
+        self.num_weights = sum([v.size
+                           for k, v in self.variables.get_weights().items()
+                           if 'value' not in k])
+        # self.net_indices = np.concatenate([v.flatten()
+        #                                    for k,v in self.variables.get_weights().items()
+        #                                    if 'value' not in k])
+        # assert(set(range(self.num_weights)) == set(self.net_indices))
+
+    def rollout(self, shift=0., rollout_length=None):
+        """
+        Performs one rollout of maximum length.
+        At each time-step it subtracts shift from the reward.
+        """
+
+        if rollout_length is None:
+            rollout_length = self.rollout_length
+
+        total_reward = 0.
+        steps = 0
+
+        ob = self.env.reset()
+        for i in range(rollout_length):
+            # print('observation before acting is', ob)
+            action = self.policy.compute(ob)
+            if type(action) is tuple:
+                action = action[0]  # otherwise it's a tuple
+            ob, reward, done, _ = self.env.step(action)
+            steps += 1
+            total_reward += (reward - shift)
+            if done:
+                break
+
+        return total_reward, steps
+
+    def do_rollouts(self, w_policy, worker_idx, num_rollouts=1, shift=0., evaluate=False, sample=False):
+        """
+        Generate multiple rollouts with a policy parametrized by w_policy.
+        """
+
+        rollout_rewards, steps, deltas_idx = [], [], []
+
+        delta_idx = worker_idx * num_rollouts
+
+        print('worker', worker_idx, 'perturbing', num_rollouts, 'weights, starting at weight', delta_idx, 'and rolling out policies.')
+
+        for i in range(delta_idx, delta_idx+num_rollouts):
+            if evaluate:
+                self.variables.set_flat(w_policy)
+                deltas_idx.append(-1)
+
+                # for evaluation we do not shift the rewards (shift = 0)
+                # and we use the
+                # default rollout length (1000 for the MuJoCo locomotion tasks)
+                time_limit = self.env.spec.timestep_limit
+                reward, r_steps = self.rollout(shift=0.,
+                                               rollout_length=time_limit)
+                rollout_rewards.append(reward)
+
+            else:
+                delta = make_elementary_vector(i, w_policy.shape, DELTA_SIZE)
+                deltas_idx.append(i)
+
+                # compute reward and number of timesteps used
+                # for positive perturbation rollout
+                self.variables.set_flat(w_policy + delta)
+                if not sample:
+                    pos_reward, pos_steps = self.rollout(shift=shift)
+                else:
+                    # TODO(nskh) average reward over rollouts if stochastic
+                    pos_reward, pos_steps = 0, 0
+                    pass
+
+                # compute reward and number of timesteps used f
+                # or negative perturbation rollout
+                self.variables.set_flat(w_policy - delta)
+                if not sample:
+                    neg_reward, neg_steps = self.rollout(shift=shift)
+                else:
+                    # TODO(nskh) average reward over rollouts if stochastic
+                    neg_reward, neg_steps = 0, 0
+                    pass
+                steps += [pos_steps, neg_steps]
+
+                rollout_rewards.append([pos_reward, neg_reward])
+
+        return {'deltas_idx': deltas_idx,
+                'rollout_rewards': rollout_rewards,
+                "steps": steps}
+
+
+def make_elementary_vector(idx, shape, step_size=0.01):
+    vec = np.zeros(shape)
+    vec[idx] = 1.0*step_size
+    return vec
+
+
+def finite_difference(reward_diff, deltas):
+    grad = np.zeros(deltas.shape[1])
+    for i in range(len(reward_diff)):
+        grad += reward_diff[i] / (2*np.linalg.norm(deltas[i, :])**2) * deltas[i,:]
+    grad = grad[:len(reward_diff)]
+    return grad

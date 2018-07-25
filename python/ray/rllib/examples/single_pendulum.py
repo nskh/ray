@@ -36,7 +36,7 @@ def create_env(env_config):
 if __name__ == '__main__':
     register_env(env_name, lambda env_config: create_env(env_config))
     config = ppo.DEFAULT_CONFIG.copy()
-    num_cpus = 8
+    num_cpus = 2
     ray.init(redirect_output=False)
     config["timesteps_per_batch"] = 64
     config["num_sgd_iter"] = 10

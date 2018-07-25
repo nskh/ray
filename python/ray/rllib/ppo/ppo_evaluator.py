@@ -131,6 +131,14 @@ class PPOEvaluator(PolicyEvaluator):
         self.common_policy = self.par_opt.get_common_loss()
         self.variables = ray.experimental.TensorFlowVariables(
             self.common_policy.loss, self.sess)
+
+        # Initializing dummy values for weights
+        self.variables.set_flat(np.arange(self.variables.get_flat_size()))
+
+        self.num_fc_weights = sum([v.size
+                                   for k, v in self.variables.get_weights().items()
+                                   if 'value' not in k])
+
         self.obs_filter = get_filter(
             config["observation_filter"], self.env.observation_space.shape)
         self.rew_filter = MeanStdFilter((), clip=5.0)
@@ -179,11 +187,17 @@ class PPOEvaluator(PolicyEvaluator):
         objs = pickle.loads(objs)
         self.sync_filters(objs["filters"])
 
-    def get_weights(self):
-        return self.variables.get_weights()
+    def get_weights(self, flat=False):
+        if flat:
+            return self.variables.get_flat()
+        else:
+            return self.variables.get_weights()
 
-    def set_weights(self, weights):
-        self.variables.set_weights(weights)
+    def set_weights(self, weights, flat=False):
+        if flat:
+            self.variables.set_flat(weights)
+        else:
+            self.variables.set_weights(weights)
 
     def sample(self):
         """Returns experience samples from this Evaluator. Observation

@@ -2,9 +2,18 @@ cartpole-ppo:
     env: CartPole-v0
     run: PPO
     stop:
-        episode_reward_mean: 200
-        time_total_s: 300
+        episode_reward_mean: 400
+        time_total_s: 600
     trial_resources:
         cpu: 1
+        extra_cpu: 0
     config:
+        timesteps_per_batch: 2048
         num_workers: 1
+        lambda: 0.95
+        gamma: 0.95
+        sgd_stepsize: 0.0003
+        sgd_batchsize: 64
+        num_sgd_iter: 10
+        model:
+            fcnet_hiddens: [2, 2]
