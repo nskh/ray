@@ -349,7 +349,7 @@ class ARSAgent(agent.Agent):
                                  for idx in deltas_idx])  # new line
         # deltas_tuple = (self.deltas.get(idx, self.w_policy.size)
         #                 for idx in deltas_idx)
-        g_hat = finite_difference(reward_diff, deltas_tuple)
+        g_hat = finite_difference(reward_diff, deltas_tuple)* DELTA_SIZE
         g_hat /= deltas_idx.size
 
         t2 = time.time()
