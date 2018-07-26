@@ -89,7 +89,7 @@ DEFAULT_CONFIG = {
 }
 
 ENV_SEED = 123
-DELTA_SIZE = 0.01
+DELTA_SIZE = 1e-5
 
 
 class PPOAgent(Agent):

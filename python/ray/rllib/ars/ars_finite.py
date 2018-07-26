@@ -46,37 +46,7 @@ DEFAULT_CONFIG = dict(
     env_config={}
 )
 
-DELTA_SIZE = 1e-4
-
-
-@ray.remote
-def create_shared_noise():
-    """
-    Create a large array of noise to be shared by all workers. Used
-    for avoiding the communication of the random perturbations delta.
-    """
-
-    seed = 12345
-    count = 250000000
-    noise = np.random.RandomState(seed).randn(count).astype(np.float64)
-    return noise
-
-
-class SharedNoiseTable(object):
-    def __init__(self, noise, seed=11):
-        self.rg = np.random.RandomState(seed)
-        self.noise = noise
-        assert self.noise.dtype == np.float64
-
-    def get(self, i, dim):
-        return self.noise[i:i + dim]
-
-    def sample_index(self, dim):
-        return self.rg.randint(0, len(self.noise) - dim + 1)
-
-    def get_delta(self, dim):
-        idx = self.sample_index(dim)
-        return idx, self.get(idx, dim)
+DELTA_SIZE = 1e-6
 
 
 @ray.remote
@@ -409,7 +379,7 @@ class ARSAgent(agent.Agent):
         # print('gradients:\n', grads)
         # print('norm of differences:\n', diffs)
         # print('***testing done***\n\n\n')
-        g_hat, info_dict = self.aggregate_rollouts(1e-5)
+        g_hat, info_dict = self.aggregate_rollouts(delta_size=DELTA_SIZE)
         print("Euclidean norm of update step:", np.linalg.norm(g_hat))
         compute_step = self.optimizer._compute_step(g_hat)
         self.w_policy -= compute_step.reshape(self.w_policy.shape)
