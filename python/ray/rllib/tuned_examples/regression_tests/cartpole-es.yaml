@@ -6,7 +6,9 @@ cartpole-ars:
 #        time_total_s: 600
     trial_resources:
         cpu: 1
-        extra_cpu: 15
+        extra_cpu: 0
+#        extra_cpu: 15
     config:
-        num_workers: 16
+        num_workers: 1
+#        num_workers: 16
         policy: MLP

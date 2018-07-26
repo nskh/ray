@@ -430,8 +430,8 @@ class PPOAgent(Agent):
         # this yields a big gradient, 5000x the output of batched_weighted_sum
         # could replace with batched_weighted_sum / (2 * norm(delta)**2)
         g_hat = finite_difference(reward_diff, deltas_tuple)
-
         g_hat /= deltas_idx.size
+
         t2 = time.time()
         print('time to aggregate rollouts', t2 - t1)
         return g_hat, info_dict

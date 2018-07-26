@@ -222,21 +222,14 @@ class ARSAgent(agent.Agent):
         self.max_past_avg_reward = float('-inf')
         self.num_episodes_used = float('inf')
 
-        # Create the shared noise table.
-        # print("Creating shared noise table.")
-        # noise_id = create_shared_noise.remote()
-        # self.deltas = SharedNoiseTable(ray.get(noise_id), seed=seed + 3)
-
         # Create the actors.
-        print("Creating actors.")
+        print("Creating workers.")
         self.num_workers = self.config["num_workers"]
         self.workers = [
             Worker.remote(
                 self.registry, self.config, self.env_creator,
                 seed + 7 * i,
-                # deltas=noise_id,
-                rollout_length=env.spec.max_episode_steps,)
-                # delta_std=self.delta_std)
+                rollout_length=env.spec.max_episode_steps)
             for i in range(self.config["num_workers"])]
 
         self.episodes_so_far = 0
@@ -356,11 +349,11 @@ class ARSAgent(agent.Agent):
                                  for idx in deltas_idx])  # new line
         # deltas_tuple = (self.deltas.get(idx, self.w_policy.size)
         #                 for idx in deltas_idx)
-        g_hat, count = utils.batched_weighted_sum(reward_diff, deltas_tuple,
-                                                  batch_size=500)
+        g_hat = finite_difference(reward_diff, deltas_tuple)
         g_hat /= deltas_idx.size
+
         t2 = time.time()
-        print('time to aggregate rollouts', t2 - t1)
+        print('time to aggregate rollouts and compute finite-difference gradient:', t2 - t1)
         return g_hat, info_dict
 
     def train_step(self):
@@ -445,11 +438,18 @@ class ARSAgent(agent.Agent):
         return self.policy.compute(observation, update=False)[0]
 
 
-# new lines
 def make_elementary_vector(idx, shape, step_size=1e-5):
     vec = np.zeros(shape)
     vec[idx] = 1.0*step_size
     return vec
+
+
+def finite_difference(reward_diff, deltas):
+    grad = np.zeros(deltas.shape[1])
+    for i in range(len(reward_diff)):
+        grad += reward_diff[i] / (2*np.linalg.norm(deltas[i, :])**2) * deltas[i,:]
+    grad = grad[:len(reward_diff)]
+    return grad
 
 
 if __name__ == '__main__':
