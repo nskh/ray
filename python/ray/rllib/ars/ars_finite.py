@@ -114,8 +114,8 @@ class Worker(object):
 
         return total_reward, steps
 
-    # def do_rollouts(self, w_policy, num_rollouts=1, shift=1, evaluate=False):
-    def do_rollouts(self, w_policy, worker_idx, delta_size, num_rollouts=1, shift=1, evaluate=False, sample=False):
+    def do_rollouts(self, w_policy, worker_idx, delta_size, num_rollouts=1, shift=1, evaluate=False,
+                    sample=False, num_samples=20):
         """ 
         Generate multiple rollouts with a policy parametrized by w_policy.
         """
@@ -131,63 +131,41 @@ class Worker(object):
                 deltas_idx.append(-1)
 
                 # for evaluation we do not shift the rewards (shift = 0)
-                # and we use the
-                # default rollout length (1000 for the MuJoCo locomotion tasks)
+                # and we use the default rollout length (1000 for
+                # the MuJoCo locomotion tasks)
                 time_limit = self.env.spec.timestep_limit
                 reward, r_steps = self.rollout(shift=0.,
                                                rollout_length=time_limit)
                 rollout_rewards.append(reward)
 
             else:
-                # idx, delta = self.deltas.get_delta(w_policy.size)
-                # delta = (self.delta_std * delta).reshape(w_policy.shape)
-                # deltas_idx.append(idx)
                 delta = make_elementary_vector(i, w_policy.shape, delta_size)  # new line
                 deltas_idx.append(i)  # new line
 
                 # compute reward and number of timesteps used
                 # for positive perturbation rollout
                 self.policy.set_weights(w_policy + delta)
-                # pos_reward, pos_steps = self.rollout(shift=shift)
                 if not sample:  # new line
                     pos_reward, pos_steps = self.rollout(shift=shift)  # new line
-                else:  # new line
-                    # TODO(nskh) average reward over rollouts if stochastic  # new line
-                    pos_reward, pos_steps = 0, 0  # new line
-                    pass  # new line
+                else:
+                    res = np.zeros((2,))
+                    for _ in range(num_samples):
+                        res += self.rollout(shift=shift)  # summing
+                    pos_reward, pos_steps = res / num_samples  # averaging and unpacking result
 
                 # compute reward and number of timesteps used f
                 # or negative perturbation rollout
                 self.policy.set_weights(w_policy - delta)
-                # neg_reward, neg_steps = self.rollout(shift=shift)
                 if not sample:  # new line
                     neg_reward, neg_steps = self.rollout(shift=shift)  # new line
-                else:  # new line
-                    # TODO(nskh) average reward over rollouts if stochastic  # new line
-                    neg_reward, neg_steps = 0, 0  # new line
-                    pass  # new line
+                else:
+                    res = np.zeros((2,))
+                    for _ in range(num_samples):
+                        res += self.rollout(shift=shift)
+                    neg_reward, neg_steps = res / num_samples  # averaging and unpacking result
                 steps += [pos_steps, neg_steps]
 
                 rollout_rewards.append([pos_reward, neg_reward])
-
-                # # idx, delta = self.deltas.get_delta(w_policy.size)
-                #
-                # # delta = (self.delta_std * delta).reshape(w_policy.shape)
-                #
-                # deltas_idx.append(idx)
-                #
-                # # compute reward and number of timesteps used
-                # # for positive perturbation rollout
-                # self.policy.set_weights(w_policy + delta)
-                # pos_reward, pos_steps = self.rollout(shift=shift)
-                #
-                # # compute reward and number of timesteps used f
-                # # or negative pertubation rollout
-                # self.policy.set_weights(w_policy - delta)
-                # neg_reward, neg_steps = self.rollout(shift=shift)
-                # steps += [pos_steps, neg_steps]
-                #
-                # rollout_rewards.append([pos_reward, neg_reward])
 
         return {'deltas_idx': deltas_idx,
                 'rollout_rewards': rollout_rewards,
@@ -276,9 +254,10 @@ class ARSAgent(agent.Agent):
                                                      delta_size,  # new line
                                                      num_rollouts=num_rollouts,
                                                      shift=self.shift,
-                                                     evaluate=evaluate)
+                                                     evaluate=evaluate,
+                                                     sample=True,
+                                                     num_samples=20)
                            for delta_idx, worker in enumerate(self.workers)]
-                            # for worker in self.workers]
 
         remainder_workers = self.workers[:(num_deltas % self.num_workers)]
         remainder_idx_start = int(num_deltas / self.num_workers) * self.num_workers  # new line
@@ -289,9 +268,10 @@ class ARSAgent(agent.Agent):
                                                      delta_size,  # new line
                                                      num_rollouts=1,
                                                      shift=self.shift,
-                                                     evaluate=evaluate)
+                                                     evaluate=evaluate,
+                                                     sample=True,
+                                                     num_samples=20)
                            for delta_idx, worker in zip(remainder_indices, remainder_workers)]
-                            # for worker in self.workers
 
         # gather results 
         results_one = ray.get(rollout_ids_one)
@@ -325,17 +305,6 @@ class ARSAgent(agent.Agent):
 
         if evaluate:
             return rollout_rewards
-
-        # # select top performing directions if deltas_used < num_deltas
-        # max_rewards = np.max(rollout_rewards, axis=1)
-        # if self.deltas_used > self.num_deltas:
-        #     self.deltas_used = self.num_deltas
-        #
-        # percentage = (1 - (self.deltas_used / self.num_deltas))
-        # idx = np.arange(max_rewards.size)[
-        #     max_rewards >= np.percentile(max_rewards, 100 * percentage)]
-        # deltas_idx = deltas_idx[idx]
-        # rollout_rewards = rollout_rewards[idx, :]
 
         # normalize rewards by their standard deviation
         rollout_rewards /= np.std(rollout_rewards)

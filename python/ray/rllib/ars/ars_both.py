@@ -288,7 +288,7 @@ class FiniteWorker(object):
                     res = np.zeros((2,))
                     for _ in range(num_samples):
                         res += self.rollout(shift=shift)  # summing
-                    pos_reward, pos_steps = res / num_samples # averaging and unpacking result
+                    pos_reward, pos_steps = res / num_samples  # averaging and unpacking result
 
                 # compute reward and number of timesteps used
                 # for negative perturbation rollout
