@@ -122,7 +122,7 @@ class Worker(object):
     def rollout(self, shift=0., rollout_length=None):
         """ 
         Performs one rollout of maximum length rollout_length. 
-        At each time-step it substracts shift from the reward.
+        At each time-step it subtracts shift from the reward.
         """
 
         if rollout_length is None:

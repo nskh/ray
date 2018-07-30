@@ -33,7 +33,7 @@ Result = namedtuple("Result", [
     "eval_returns", "eval_lengths"
 ])
 
-DELTA_SIZE = 1e-6
+DELTA_SIZE = 1e-5
 
 DEFAULT_CONFIG = dict(
     num_workers=2,
@@ -178,7 +178,7 @@ class RandomWorker(object):
                 pos_reward, pos_steps = self.rollout(shift=shift)
 
                 # compute reward and number of timesteps used f
-                # or negative pertubation rollout
+                # or negative perturbation rollout
                 self.policy.set_weights(w_policy - delta)
                 neg_reward, neg_steps = self.rollout(shift=shift)
                 steps += [pos_steps, neg_steps]
@@ -231,7 +231,7 @@ class FiniteWorker(object):
     def rollout(self, shift=0., rollout_length=None):
         """ 
         Performs one rollout of maximum length rollout_length. 
-        At each time-step it substracts shift from the reward.
+        At each time-step it subtracts shift from the reward.
         """
 
         if rollout_length is None:
@@ -252,7 +252,8 @@ class FiniteWorker(object):
 
         return total_reward, steps
 
-    def do_rollouts(self, w_policy, worker_idx, delta_size, num_rollouts=1, shift=1, evaluate=False, sample=False):
+    def do_rollouts(self, w_policy, worker_idx, delta_size, num_rollouts=1, shift=1, evaluate=False,
+                    sample=False, num_samples=20):
         """ 
         Generate multiple rollouts with a policy parametrized by w_policy.
         """
@@ -284,9 +285,10 @@ class FiniteWorker(object):
                 if not sample:
                     pos_reward, pos_steps = self.rollout(shift=shift)
                 else:
-                    # TODO(nskh) average reward over rollouts if stochastic
-                    pos_reward, pos_steps = 0, 0
-                    pass
+                    res = np.zeros((2,))
+                    for _ in range(num_samples):
+                        res += self.rollout(shift=shift)  # summing
+                    pos_reward, pos_steps = res / num_samples # averaging and unpacking result
 
                 # compute reward and number of timesteps used
                 # for negative perturbation rollout
@@ -294,9 +296,10 @@ class FiniteWorker(object):
                 if not sample:
                     neg_reward, neg_steps = self.rollout(shift=shift)
                 else:
-                    # TODO(nskh) average reward over rollouts if stochastic
-                    neg_reward, neg_steps = 0, 0
-                    pass
+                    res = np.zeros((2,))
+                    for _ in range(num_samples):
+                        res += self.rollout(shift=shift)
+                    neg_reward, neg_steps = res / num_samples  # averaging and unpacking result
                 steps += [pos_steps, neg_steps]
 
                 rollout_rewards.append([pos_reward, neg_reward])
@@ -437,7 +440,7 @@ class ARSAgent(agent.Agent):
 
         t2 = time.time()
 
-        print('Time to generate rollouts:', t2 - t1)
+        print('Time to generate RandomWorker rollouts:', t2 - t1)
 
         if evaluate:
             return rollout_rewards
@@ -467,7 +470,7 @@ class ARSAgent(agent.Agent):
                                                   batch_size=500)
         g_hat /= deltas_idx.size
         t2 = time.time()
-        print('time to aggregate rollouts', t2 - t1)
+        print('time to aggregate RandomWorker rollouts', t2 - t1)
         return g_hat, info_dict
 
     def aggregate_finite_rollouts(self, delta_size, num_rollouts=None, evaluate=False):
@@ -489,7 +492,9 @@ class ARSAgent(agent.Agent):
                                                      delta_size,
                                                      num_rollouts=num_rollouts,
                                                      shift=self.shift,
-                                                     evaluate=evaluate)
+                                                     evaluate=evaluate,
+                                                     sample=True,
+                                                     num_samples=20)
                            for delta_idx, worker in enumerate(self.finite_workers)]
 
         remainder_workers = self.finite_workers[:(num_deltas % self.num_workers)]
@@ -501,7 +506,9 @@ class ARSAgent(agent.Agent):
                                                      delta_size,
                                                      num_rollouts=1,
                                                      shift=self.shift,
-                                                     evaluate=evaluate)
+                                                     evaluate=evaluate,
+                                                     sample=True,
+                                                     num_samples=20)
                            for delta_idx, worker in zip(remainder_indices, remainder_workers)]
 
         # gather results
@@ -532,7 +539,7 @@ class ARSAgent(agent.Agent):
 
         t2 = time.time()
 
-        print('Time to generate rollouts:', t2 - t1)
+        print('Time to generate FiniteWorker rollouts:', t2 - t1)
 
         if evaluate:
             return rollout_rewards
@@ -547,11 +554,11 @@ class ARSAgent(agent.Agent):
         reward_diff = rollout_rewards[:, 0] - rollout_rewards[:, 1]
         deltas_tuple = np.array([make_elementary_vector(idx, self.w_policy.size, delta_size)  # new line
                                  for idx in deltas_idx])  # new line
-        g_hat = finite_difference(reward_diff, deltas_tuple)* DELTA_SIZE
+        g_hat = finite_difference(reward_diff, deltas_tuple) * DELTA_SIZE
         g_hat /= deltas_idx.size
 
         t2 = time.time()
-        print('time to aggregate rollouts and compute finite-difference gradient:', t2 - t1)
+        print('time to aggregate FiniteWorker rollouts:', t2 - t1)
         return g_hat, info_dict
 
     def train_step(self):
@@ -560,9 +567,8 @@ class ARSAgent(agent.Agent):
         """
 
         g_hat, info_dict = self.aggregate_random_rollouts()
-        f_g_hat, f_info_doct = self.aggregate_finite_rollouts(delta_size=DELTA_SIZE)
-        import ipdb
-        ipdb.set_trace()
+        f_g_hat, f_info_dict = self.aggregate_finite_rollouts(delta_size=DELTA_SIZE)
+        print('dot product:', (g_hat / np.linalg.norm(g_hat)) @ (f_g_hat / np.linalg.norm(f_g_hat)))
         print("Euclidean norm of update step:", np.linalg.norm(g_hat))
         compute_step = self.optimizer._compute_step(g_hat)
         self.w_policy -= compute_step.reshape(self.w_policy.shape)
