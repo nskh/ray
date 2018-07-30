@@ -34,6 +34,7 @@ Result = namedtuple("Result", [
 ])
 
 DELTA_SIZE = 1e-5
+NUM_SAMPLES = 40
 
 DEFAULT_CONFIG = dict(
     num_workers=2,
@@ -494,7 +495,7 @@ class ARSAgent(agent.Agent):
                                                      shift=self.shift,
                                                      evaluate=evaluate,
                                                      sample=True,
-                                                     num_samples=20)
+                                                     num_samples=NUM_SAMPLES)
                            for delta_idx, worker in enumerate(self.finite_workers)]
 
         remainder_workers = self.finite_workers[:(num_deltas % self.num_workers)]
@@ -508,7 +509,7 @@ class ARSAgent(agent.Agent):
                                                      shift=self.shift,
                                                      evaluate=evaluate,
                                                      sample=True,
-                                                     num_samples=20)
+                                                     num_samples=NUM_SAMPLES)
                            for delta_idx, worker in zip(remainder_indices, remainder_workers)]
 
         # gather results
