@@ -46,7 +46,7 @@ DEFAULT_CONFIG = dict(
     env_config={}
 )
 
-DELTA_SIZE = 1e-6
+DELTA_SIZE = 5e-5
 
 
 @ray.remote

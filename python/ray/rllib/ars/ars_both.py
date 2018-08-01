@@ -33,7 +33,7 @@ Result = namedtuple("Result", [
     "eval_returns", "eval_lengths"
 ])
 
-DELTA_SIZE = 1e-5
+DELTA_SIZE = 5e-5
 NUM_SAMPLES = 40
 
 DEFAULT_CONFIG = dict(
@@ -253,8 +253,8 @@ class FiniteWorker(object):
 
         return total_reward, steps
 
-    def do_rollouts(self, w_policy, worker_idx, delta_size, num_rollouts=1, shift=1, evaluate=False,
-                    sample=False, num_samples=20):
+    def do_rollouts(self, w_policy, worker_idx, delta_size, num_rollouts=1,
+                    shift=1, evaluate=False, sample=False, num_samples=20):
         """ 
         Generate multiple rollouts with a policy parametrized by w_policy.
         """
@@ -293,7 +293,10 @@ class FiniteWorker(object):
 
                 # compute reward and number of timesteps used
                 # for negative perturbation rollout
-                self.policy.set_weights(w_policy - delta)
+                # self.policy.set_weights(w_policy - delta)
+
+                # NOW THIS IS A RIGHT FINITE DIFFERENCE: [f(x+h) - f(x)] / h
+                self.policy.set_weights(w_policy)
                 if not sample:
                     neg_reward, neg_steps = self.rollout(shift=shift)
                 else:
@@ -488,29 +491,29 @@ class ARSAgent(agent.Agent):
         num_rollouts = int(num_deltas / self.num_workers)
 
         # parallel generation of rollouts
-        rollout_ids_one = [worker.do_rollouts.remote(policy_id,
-                                                     delta_idx,
-                                                     delta_size,
-                                                     num_rollouts=num_rollouts,
-                                                     shift=self.shift,
-                                                     evaluate=evaluate,
-                                                     sample=True,
-                                                     num_samples=NUM_SAMPLES)
-                           for delta_idx, worker in enumerate(self.finite_workers)]
+        rollout_ids_one = [f_worker.do_rollouts.remote(policy_id,
+                                                       delta_idx,
+                                                        delta_size,
+                                                        num_rollouts=num_rollouts,
+                                                        shift=self.shift,
+                                                        evaluate=evaluate,
+                                                        sample=True,
+                                                        num_samples=NUM_SAMPLES)
+                           for delta_idx, f_worker in enumerate(self.finite_workers)]
 
         remainder_workers = self.finite_workers[:(num_deltas % self.num_workers)]
         remainder_idx_start = int(num_deltas / self.num_workers) * self.num_workers
         remainder_indices = range(remainder_idx_start, remainder_idx_start + len(remainder_workers))
         # handle the remainder of num_delta/num_workers
-        rollout_ids_two = [worker.do_rollouts.remote(policy_id,
-                                                     delta_idx,
-                                                     delta_size,
-                                                     num_rollouts=1,
-                                                     shift=self.shift,
-                                                     evaluate=evaluate,
-                                                     sample=True,
-                                                     num_samples=NUM_SAMPLES)
-                           for delta_idx, worker in zip(remainder_indices, remainder_workers)]
+        rollout_ids_two = [f_worker.do_rollouts.remote(policy_id,
+                                                       delta_idx,
+                                                       delta_size,
+                                                       num_rollouts=1,
+                                                       shift=self.shift,
+                                                       evaluate=evaluate,
+                                                       sample=True,
+                                                       num_samples=NUM_SAMPLES)
+                           for delta_idx, f_worker in zip(remainder_indices, remainder_workers)]
 
         # gather results
         results_one = ray.get(rollout_ids_one)
@@ -555,7 +558,7 @@ class ARSAgent(agent.Agent):
         reward_diff = rollout_rewards[:, 0] - rollout_rewards[:, 1]
         deltas_tuple = np.array([make_elementary_vector(idx, self.w_policy.size, delta_size)  # new line
                                  for idx in deltas_idx])  # new line
-        g_hat = finite_difference(reward_diff, deltas_tuple) * DELTA_SIZE
+        g_hat = finite_difference(reward_diff, deltas_tuple, scale=1) * DELTA_SIZE
         g_hat /= deltas_idx.size
 
         t2 = time.time()
@@ -642,9 +645,16 @@ def make_elementary_vector(idx, shape, step_size=1e-5):
     return vec
 
 
-def finite_difference(reward_diff, deltas):
+def finite_difference(reward_diff, deltas, scale=2):
+    """
+
+    :param reward_diff:
+    :param deltas:
+    :param scale: defaults to 2 for central finite difference (f(x+h) - f(x-h)) / 2h
+    :return:
+    """
     grad = np.zeros(deltas.shape[1])
     for i in range(len(reward_diff)):
-        grad += reward_diff[i] / (2*np.linalg.norm(deltas[i, :])**2) * deltas[i,:]
+        grad += reward_diff[i] / (scale*np.linalg.norm(deltas[i, :])**2) * deltas[i,:]
     grad = grad[:len(reward_diff)]
     return grad

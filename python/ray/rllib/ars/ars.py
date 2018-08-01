@@ -176,7 +176,7 @@ class Worker(object):
                 pos_reward, pos_steps = self.rollout(shift=shift)
 
                 # compute reward and number of timesteps used f
-                # or negative pertubation rollout
+                # or negative perturbation rollout
                 self.policy.set_weights(w_policy - delta)
                 neg_reward, neg_steps = self.rollout(shift=shift)
                 steps += [pos_steps, neg_steps]
