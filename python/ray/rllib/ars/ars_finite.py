@@ -222,6 +222,7 @@ class ARSAgent(agent.Agent):
         # initialize optimization algorithm
         self.optimizer = optimizers.SGD(self.w_policy, self.config["sgd_stepsize"])
         print("Initialization of ARS complete.")
+        print("Running ars_finite.py")
 
     # FIXME(ev) should return the rewards and some other statistics
     # def aggregate_rollouts(self, num_rollouts=None, evaluate=False):
