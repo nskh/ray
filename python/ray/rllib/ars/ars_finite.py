@@ -142,7 +142,7 @@ class Worker(object):
                     res = np.zeros((2,))
                     for _ in range(num_samples):
                         res += self.rollout(shift=shift)  # summing
-                    pos_reward, pos_steps = res / num_samples  # averaging and unpacking result
+                    pos_reward, pos_steps = res[0] / num_samples, res[1]  # averaging and unpacking result
 
                 # compute reward and number of timesteps used
                 # for negative perturbation rollout
@@ -156,7 +156,7 @@ class Worker(object):
                     res = np.zeros((2,))
                     for _ in range(num_samples):
                         res += self.rollout(shift=shift)
-                    neg_reward, neg_steps = res / num_samples  # averaging and unpacking result
+                    neg_reward, neg_steps = res[0] / num_samples, res[1]  # averaging and unpacking result
                 steps += [pos_steps, neg_steps]
 
                 rollout_rewards.append([pos_reward, neg_reward])
