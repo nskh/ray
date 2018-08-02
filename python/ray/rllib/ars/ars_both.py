@@ -11,29 +11,23 @@ Benjamin Recht
 # FIXME(ev) doesn't work for pendulum yet
 # FIXME(ev) do rollout length in a standard way
 
-import parser
 import time
 import os
 import pickle
 import numpy as np
-import gym
-import ray
 from ray.rllib.es import utils
 from ray.rllib.ars import optimizers
 from ray.rllib import agent
 from collections import namedtuple
 from ray.rllib.ars.policies import *
 from ray.rllib.es import tabular_logger as tlogger
-import socket
 import ray.tune as tune
-from ray.tune import grid_search
 
 Result = namedtuple("Result", [
     "noise_indices", "noisy_returns", "sign_noisy_returns", "noisy_lengths",
     "eval_returns", "eval_lengths"
 ])
 
-DELTA_SIZE = 5e-5
 NUM_SAMPLES = 5
 
 DEFAULT_CONFIG = dict(
@@ -47,7 +41,9 @@ DEFAULT_CONFIG = dict(
     policy='Linear',
     seed=123,
     eval_rollouts=50,
-    env_config={}
+    env_config={},
+    delta_size=5e-5,
+    num_samples=5,
 )
 
 
@@ -196,14 +192,13 @@ class RandomWorker(object):
 
 @ray.remote
 class FiniteWorker(object):
-    """ 
+    """
     Object class for parallel rollout generation.
     """
 
     def __init__(self, registry, config, env_creator,
                  env_seed,
-                 rollout_length=1000,
-                 delta_std=0.02):
+                 rollout_length=1000):
 
         # initialize OpenAI environment for each worker
         self.env = env_creator(config["env_config"])
@@ -217,7 +212,6 @@ class FiniteWorker(object):
         self.preprocessor = models.ModelCatalog.get_preprocessor(
             registry, self.env)
 
-        self.delta_std = delta_std
         self.rollout_length = rollout_length
         self.sess = utils.make_session(single_threaded=True)
         if config['policy'] == 'Linear':
@@ -229,9 +223,11 @@ class FiniteWorker(object):
                 registry, self.sess, self.env.action_space, self.preprocessor,
                 config["observation_filter"])
 
+        self.delta_size = config['delta_size']
+
     def rollout(self, shift=0., rollout_length=None):
-        """ 
-        Performs one rollout of maximum length rollout_length. 
+        """
+        Performs one rollout of maximum length rollout_length.
         At each time-step it subtracts shift from the reward.
         """
 
@@ -253,23 +249,24 @@ class FiniteWorker(object):
 
         return total_reward, steps
 
-    def do_rollouts(self, w_policy, worker_idx, delta_size, num_rollouts=1,
-                    shift=1, evaluate=False, sample=False, num_samples=20):
-        """ 
+    def do_rollouts(self, w_policy, worker_idx, num_rollouts=1, shift=1, evaluate=False,
+                    sample=False, num_samples=5):
+        """
         Generate multiple rollouts with a policy parametrized by w_policy.
         """
 
         rollout_rewards, steps, deltas_idx = [], [], []
 
-        delta_idx = worker_idx * num_rollouts
+        delta_idx = worker_idx * num_rollouts  # new line
 
-        for i in range(delta_idx, delta_idx+num_rollouts):
+        # for i in range(num_rollouts):
+        for i in range(delta_idx, delta_idx+num_rollouts):  # new line
             if evaluate:
                 self.policy.set_weights(w_policy)
                 deltas_idx.append(-1)
 
                 # for evaluation we do not shift the rewards (shift = 0)
-                # and we use the default rollout length (1000 for 
+                # and we use the default rollout length (1000 for
                 # the MuJoCo locomotion tasks)
                 time_limit = self.env.spec.timestep_limit
                 reward, r_steps = self.rollout(shift=0.,
@@ -277,14 +274,14 @@ class FiniteWorker(object):
                 rollout_rewards.append(reward)
 
             else:
-                delta = make_elementary_vector(i, w_policy.shape, delta_size)
-                deltas_idx.append(i)
+                delta = make_elementary_vector(i, w_policy.shape, self.delta_size)  # new line
+                deltas_idx.append(i)  # new line
 
                 # compute reward and number of timesteps used
                 # for positive perturbation rollout
                 self.policy.set_weights(w_policy + delta)
-                if not sample:
-                    pos_reward, pos_steps = self.rollout(shift=shift)
+                if not sample:  # new line
+                    pos_reward, pos_steps = self.rollout(shift=shift)  # new line
                 else:
                     res = np.zeros((2,))
                     for _ in range(num_samples):
@@ -298,7 +295,7 @@ class FiniteWorker(object):
                 # NOW THIS IS A RIGHT FINITE DIFFERENCE: [f(x+h) - f(x)] / h
                 self.policy.set_weights(w_policy)
                 if not sample:
-                    neg_reward, neg_steps = self.rollout(shift=shift)
+                    neg_reward, neg_steps = self.rollout(shift=shift)  # new line
                 else:
                     res = np.zeros((2,))
                     for _ in range(num_samples):
@@ -313,7 +310,7 @@ class FiniteWorker(object):
                 "steps": steps}
 
     def get_weights(self):
-        return self.policy.get_weights()        
+        return self.policy.get_weights()
 
 
 class ARSAgent(agent.Agent):
@@ -361,8 +358,7 @@ class ARSAgent(agent.Agent):
             FiniteWorker.remote(
                 self.registry, self.config, self.env_creator,
                 seed + 7 * i,
-                rollout_length=env.spec.max_episode_steps,
-                delta_std=self.delta_std)
+                rollout_length=env.spec.max_episode_steps)
             for i in range(self.config["num_workers"])]            
 
         self.episodes_so_far = 0
@@ -379,6 +375,7 @@ class ARSAgent(agent.Agent):
                 self.registry, self.sess, env.action_space, preprocessor,
                 self.config["observation_filter"])
         self.w_policy = self.policy.get_weights()
+        self.delta_size = self.config['delta_size']
 
         # initialize optimization algorithm
         self.optimizer = optimizers.SGD(self.w_policy, self.config["sgd_stepsize"])
@@ -477,7 +474,7 @@ class ARSAgent(agent.Agent):
         print('time to aggregate RandomWorker rollouts', t2 - t1)
         return g_hat, info_dict
 
-    def aggregate_finite_rollouts(self, delta_size, num_rollouts=None, evaluate=False):
+    def aggregate_finite_rollouts(self, evaluate=False):
         """
         Aggregate update step from rollouts generated in parallel.
         """
@@ -493,8 +490,7 @@ class ARSAgent(agent.Agent):
         # parallel generation of rollouts
         rollout_ids_one = [f_worker.do_rollouts.remote(policy_id,
                                                        delta_idx,
-                                                        delta_size,
-                                                        num_rollouts=num_rollouts,
+                                                       num_rollouts=num_rollouts,
                                                         shift=self.shift,
                                                         evaluate=evaluate,
                                                         sample=True,
@@ -507,7 +503,6 @@ class ARSAgent(agent.Agent):
         # handle the remainder of num_delta/num_workers
         rollout_ids_two = [f_worker.do_rollouts.remote(policy_id,
                                                        delta_idx,
-                                                       delta_size,
                                                        num_rollouts=1,
                                                        shift=self.shift,
                                                        evaluate=evaluate,
@@ -556,9 +551,9 @@ class ARSAgent(agent.Agent):
         # aggregate rollouts to form the gradient used to compute SGD step
         # reward_diff is vector of positive diff reward minus negative diff reward
         reward_diff = rollout_rewards[:, 0] - rollout_rewards[:, 1]
-        deltas_tuple = np.array([make_elementary_vector(idx, self.w_policy.size, delta_size)  # new line
+        deltas_tuple = np.array([make_elementary_vector(idx, self.w_policy.size, self.delta_size)  # new line
                                  for idx in deltas_idx])  # new line
-        g_hat = finite_difference(reward_diff, deltas_tuple, scale=1) * DELTA_SIZE
+        g_hat = finite_difference(reward_diff, deltas_tuple, scale=1) * self.delta_size
         g_hat /= deltas_idx.size
 
         t2 = time.time()
@@ -571,7 +566,9 @@ class ARSAgent(agent.Agent):
         """
 
         g_hat, info_dict = self.aggregate_random_rollouts()
-        f_g_hat, f_info_dict = self.aggregate_finite_rollouts(delta_size=DELTA_SIZE)
+        f_g_hat, f_info_dict = self.aggregate_finite_rollouts()
+        import ipdb
+        ipdb.set_trace()
         print('dot product:', (g_hat / np.linalg.norm(g_hat)) @ (f_g_hat / np.linalg.norm(f_g_hat)))
         print("Euclidean norm of update step:", np.linalg.norm(g_hat))
         compute_step = self.optimizer._compute_step(g_hat)
