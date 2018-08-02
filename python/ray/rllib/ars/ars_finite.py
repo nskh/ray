@@ -34,14 +34,14 @@ Result = namedtuple("Result", [
 
 DEFAULT_CONFIG = dict(
     num_workers=2,
-    sgd_stepsize=0.01,
+    sgd_stepsize=0.05,
     shift=0,
     observation_filter='NoFilter',
     policy='Linear',
     seed=123,
     eval_rollouts=50,
     env_config={},
-    delta_size=5e-5,
+    delta_size=1e-4,
     num_samples=5,
 )
 
