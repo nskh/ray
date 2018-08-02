@@ -34,20 +34,16 @@ Result = namedtuple("Result", [
 
 DEFAULT_CONFIG = dict(
     num_workers=2,
-    num_deltas=320,  # 320
-    deltas_used=320,  # 320
-    delta_std=0.02,
     sgd_stepsize=0.01,
     shift=0,
     observation_filter='NoFilter',
     policy='Linear',
     seed=123,
     eval_rollouts=50,
-    env_config={}
+    env_config={},
+    delta_size=5e-5,
+    num_samples=5,
 )
-
-DELTA_SIZE = 5e-5
-
 
 @ray.remote
 class Worker(object):
@@ -58,8 +54,7 @@ class Worker(object):
     def __init__(self, registry, config, env_creator,
                  env_seed,
                  # deltas=None,
-                 rollout_length=1000,
-                 delta_std=0.02):
+                 rollout_length=1000):
 
         # initialize OpenAI environment for each worker
         self.env = env_creator(config["env_config"])
@@ -69,16 +64,10 @@ class Worker(object):
         self.preprocessor = models.ModelCatalog.get_preprocessor(
             registry, self.env)
 
-        # each worker gets access to the shared noise table
-        # with independent random streams for sampling
-        # from the shared noise table. 
-        # self.deltas = SharedNoiseTable(deltas, env_seed + 7)
-
         from ray.rllib import models
         self.preprocessor = models.ModelCatalog.get_preprocessor(
             registry, self.env)
 
-        self.delta_std = delta_std
         self.rollout_length = rollout_length
         self.sess = utils.make_session(single_threaded=True)
         if config['policy'] == 'Linear':
@@ -90,10 +79,12 @@ class Worker(object):
                 registry, self.sess, self.env.action_space, self.preprocessor,
                 config["observation_filter"])
 
+        self.delta_size = config['delta_size']
+
     def rollout(self, shift=0., rollout_length=None):
         """ 
         Performs one rollout of maximum length rollout_length. 
-        At each time-step it substracts shift from the reward.
+        At each time-step it subtracts shift from the reward.
         """
 
         if rollout_length is None:
@@ -114,8 +105,8 @@ class Worker(object):
 
         return total_reward, steps
 
-    def do_rollouts(self, w_policy, worker_idx, delta_size, num_rollouts=1, shift=1, evaluate=False,
-                    sample=False, num_samples=20):
+    def do_rollouts(self, w_policy, worker_idx, num_rollouts=1, shift=1, evaluate=False,
+                    sample=False, num_samples=5):
         """ 
         Generate multiple rollouts with a policy parametrized by w_policy.
         """
@@ -139,7 +130,7 @@ class Worker(object):
                 rollout_rewards.append(reward)
 
             else:
-                delta = make_elementary_vector(i, w_policy.shape, delta_size)  # new line
+                delta = make_elementary_vector(i, w_policy.shape, self.delta_size)  # new line
                 deltas_idx.append(i)  # new line
 
                 # compute reward and number of timesteps used
@@ -153,10 +144,13 @@ class Worker(object):
                         res += self.rollout(shift=shift)  # summing
                     pos_reward, pos_steps = res / num_samples  # averaging and unpacking result
 
-                # compute reward and number of timesteps used f
-                # or negative perturbation rollout
-                self.policy.set_weights(w_policy - delta)
-                if not sample:  # new line
+                # compute reward and number of timesteps used
+                # for negative perturbation rollout
+                # self.policy.set_weights(w_policy - delta)
+
+                # NOW THIS IS A RIGHT FINITE DIFFERENCE: [f(x+h) - f(x)] / h
+                self.policy.set_weights(w_policy)
+                if not sample:
                     neg_reward, neg_steps = self.rollout(shift=shift)  # new line
                 else:
                     res = np.zeros((2,))
@@ -191,10 +185,7 @@ class ARSAgent(agent.Agent):
             self.registry, env)
 
         self.timesteps = 0
-        # self.num_deltas = self.config["num_deltas"]
-        # self.deltas_used = self.config["deltas_used"]
         self.step_size = self.config["sgd_stepsize"]
-        # self.delta_std = self.config["delta_std"]
         seed = self.config["seed"]
         self.shift = self.config["shift"]
         self.max_past_avg_reward = float('-inf')
@@ -225,6 +216,8 @@ class ARSAgent(agent.Agent):
                 self.config["observation_filter"])
         self.w_policy = self.policy.get_weights()
         self.num_deltas = self.w_policy.size
+        self.delta_size = self.config['delta_size']
+        self.num_samples = self.config['num_samples']
 
         # initialize optimization algorithm
         self.optimizer = optimizers.SGD(self.w_policy, self.config["sgd_stepsize"])
@@ -232,7 +225,7 @@ class ARSAgent(agent.Agent):
 
     # FIXME(ev) should return the rewards and some other statistics
     # def aggregate_rollouts(self, num_rollouts=None, evaluate=False):
-    def aggregate_rollouts(self, delta_size, num_rollouts=None, evaluate=False):  # new line (added delta_size)
+    def aggregate_rollouts(self, num_rollouts=None, evaluate=False):  # new line (added delta_size)
         """ 
         Aggregate update step from rollouts generated in parallel.
         """
@@ -251,12 +244,11 @@ class ARSAgent(agent.Agent):
         # parallel generation of rollouts
         rollout_ids_one = [worker.do_rollouts.remote(policy_id,
                                                      delta_idx,  # new line
-                                                     delta_size,  # new line
                                                      num_rollouts=num_rollouts,
                                                      shift=self.shift,
                                                      evaluate=evaluate,
                                                      sample=True,
-                                                     num_samples=20)
+                                                     num_samples=self.num_samples)
                            for delta_idx, worker in enumerate(self.workers)]
 
         remainder_workers = self.workers[:(num_deltas % self.num_workers)]
@@ -265,12 +257,11 @@ class ARSAgent(agent.Agent):
         # handle the remainder of num_delta/num_workers
         rollout_ids_two = [worker.do_rollouts.remote(policy_id,
                                                      delta_idx,  # new line
-                                                     delta_size,  # new line
                                                      num_rollouts=1,
                                                      shift=self.shift,
                                                      evaluate=evaluate,
                                                      sample=True,
-                                                     num_samples=20)
+                                                     num_samples=self.num_samples)
                            for delta_idx, worker in zip(remainder_indices, remainder_workers)]
 
         # gather results 
@@ -314,11 +305,9 @@ class ARSAgent(agent.Agent):
 
         # reward_diff is vector of positive diff reward minus negative diff reward
         reward_diff = rollout_rewards[:, 0] - rollout_rewards[:, 1]
-        deltas_tuple = np.array([make_elementary_vector(idx, self.w_policy.size, delta_size)  # new line
+        deltas_tuple = np.array([make_elementary_vector(idx, self.w_policy.size, self.delta_size)  # new line
                                  for idx in deltas_idx])  # new line
-        # deltas_tuple = (self.deltas.get(idx, self.w_policy.size)
-        #                 for idx in deltas_idx)
-        g_hat = finite_difference(reward_diff, deltas_tuple)* DELTA_SIZE
+        g_hat = finite_difference(reward_diff, deltas_tuple) * self.delta_size
         g_hat /= deltas_idx.size
 
         t2 = time.time()
@@ -341,7 +330,7 @@ class ARSAgent(agent.Agent):
         # print('gradients:\n', grads)
         # print('norm of differences:\n', diffs)
         # print('***testing done***\n\n\n')
-        g_hat, info_dict = self.aggregate_rollouts(delta_size=DELTA_SIZE)
+        g_hat, info_dict = self.aggregate_rollouts()
         print("Euclidean norm of update step:", np.linalg.norm(g_hat))
         compute_step = self.optimizer._compute_step(g_hat)
         self.w_policy -= compute_step.reshape(self.w_policy.shape)
@@ -360,8 +349,7 @@ class ARSAgent(agent.Agent):
         self.timesteps_so_far += np.sum(info_dict['steps'])
 
         # Evaluate the reward with the unperturbed params
-        rewards = self.aggregate_rollouts(delta_size=DELTA_SIZE,
-                                          num_rollouts=self.config['eval_rollouts'],
+        rewards = self.aggregate_rollouts(num_rollouts=self.config['eval_rollouts'],
                                           evaluate=True)
         w = ray.get(self.workers[0].get_weights.remote())
 
@@ -419,27 +407,3 @@ def finite_difference(reward_diff, deltas):
         grad += reward_diff[i] / (2*np.linalg.norm(deltas[i, :])**2) * deltas[i,:]
     grad = grad[:len(reward_diff)]
     return grad
-
-
-if __name__ == '__main__':
-    local_ip = socket.gethostbyname(socket.gethostname())
-    ray.init(num_cpus=2, redirect_output=False)  # redis_address= local_ip + ':6379')
-
-    # run_ars(params)
-    config = DEFAULT_CONFIG
-    config["step_size"] = grid_search([.02])
-    tune.run_experiments({
-        "my_experiment": {
-            "run": "ARS",
-            "stop": {
-                "training_iteration": 10
-            },
-            "env": 'HalfCheetah-v2',
-            "config": config,
-            "trial_resources": {
-                "cpu": 1,
-                "gpu": 0,
-                "extra_cpu": 1,
-            }
-        }
-    })

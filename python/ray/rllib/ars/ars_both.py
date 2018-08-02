@@ -34,7 +34,7 @@ Result = namedtuple("Result", [
 ])
 
 DELTA_SIZE = 5e-5
-NUM_SAMPLES = 40
+NUM_SAMPLES = 5
 
 DEFAULT_CONFIG = dict(
     num_workers=2,
