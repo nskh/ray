@@ -257,10 +257,10 @@ class FiniteWorker(object):
 
         rollout_rewards, steps, deltas_idx = [], [], []
 
-        delta_idx = worker_idx * num_rollouts  # new line
+        delta_idx = worker_idx * num_rollouts
 
         # for i in range(num_rollouts):
-        for i in range(delta_idx, delta_idx+num_rollouts):  # new line
+        for i in range(delta_idx, delta_idx+num_rollouts):
             if evaluate:
                 self.policy.set_weights(w_policy)
                 deltas_idx.append(-1)
@@ -274,14 +274,14 @@ class FiniteWorker(object):
                 rollout_rewards.append(reward)
 
             else:
-                delta = make_elementary_vector(i, w_policy.shape, self.delta_size)  # new line
-                deltas_idx.append(i)  # new line
+                delta = make_elementary_vector(i, w_policy.shape, self.delta_size)
+                deltas_idx.append(i)
 
                 # compute reward and number of timesteps used
                 # for positive perturbation rollout
                 self.policy.set_weights(w_policy + delta)
-                if not sample:  # new line
-                    pos_reward, pos_steps = self.rollout(shift=shift)  # new line
+                if not sample:
+                    pos_reward, pos_steps = self.rollout(shift=shift)
                 else:
                     res = np.zeros((2,))
                     for _ in range(num_samples):
@@ -295,7 +295,7 @@ class FiniteWorker(object):
                 # NOW THIS IS A RIGHT FINITE DIFFERENCE: [f(x+h) - f(x)] / h
                 self.policy.set_weights(w_policy)
                 if not sample:
-                    neg_reward, neg_steps = self.rollout(shift=shift)  # new line
+                    neg_reward, neg_steps = self.rollout(shift=shift)
                 else:
                     res = np.zeros((2,))
                     for _ in range(num_samples):
@@ -551,8 +551,8 @@ class ARSAgent(agent.Agent):
         # aggregate rollouts to form the gradient used to compute SGD step
         # reward_diff is vector of positive diff reward minus negative diff reward
         reward_diff = rollout_rewards[:, 0] - rollout_rewards[:, 1]
-        deltas_tuple = np.array([make_elementary_vector(idx, self.w_policy.size, self.delta_size)  # new line
-                                 for idx in deltas_idx])  # new line
+        deltas_tuple = np.array([make_elementary_vector(idx, self.w_policy.size, self.delta_size)
+                                 for idx in deltas_idx])
         g_hat = finite_difference(reward_diff, deltas_tuple, scale=1) * self.delta_size
         g_hat /= deltas_idx.size
 
@@ -567,8 +567,6 @@ class ARSAgent(agent.Agent):
 
         g_hat, info_dict = self.aggregate_random_rollouts()
         f_g_hat, f_info_dict = self.aggregate_finite_rollouts()
-        import ipdb
-        ipdb.set_trace()
         print('dot product:', (g_hat / np.linalg.norm(g_hat)) @ (f_g_hat / np.linalg.norm(f_g_hat)))
         print("Euclidean norm of update step:", np.linalg.norm(g_hat))
         compute_step = self.optimizer._compute_step(g_hat)
@@ -589,7 +587,7 @@ class ARSAgent(agent.Agent):
 
         # Evaluate the reward with the unperturbed params
         rewards = self.aggregate_random_rollouts(num_rollouts=self.config['eval_rollouts'],
-                                          evaluate=True)
+                                                 evaluate=True)
         w = ray.get(self.random_workers[0].get_weights.remote())
 
         tlogger.record_tabular("AverageReward", np.mean(rewards))
