@@ -102,7 +102,6 @@ class Reshaper(object):
 
 
     def get_flat_shape(self):
-        import ipdb; ipdb.set_trace()
         return self.slice_positions[-1]
 
 
