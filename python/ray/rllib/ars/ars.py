@@ -366,6 +366,8 @@ class ARSAgent(agent.Agent):
         print('total time of one step', t2 - t1)
 
         self.iter_vars.append({'grad': g_hat, 'weights': self.policy.variables.get_weights()})
+        with open(self.logdir + '/iter_vars.pkl', 'wb') as file:
+            pickle.dump(self.iter_vars, file)
 
         self.episodes_so_far += len(info_dict['steps'])
         self.timesteps_so_far += np.sum(info_dict['steps'])

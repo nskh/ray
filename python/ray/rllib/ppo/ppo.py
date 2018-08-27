@@ -121,6 +121,8 @@ class PPOAgent(Agent):
             self.file_writer = None
         self.saver = tf.train.Saver(max_to_keep=None)
 
+        self.iter_vars = []
+
     def _train(self):
         agents = self.remote_evaluators
         config = self.config
@@ -239,6 +241,11 @@ class PPOAgent(Agent):
             "sgd_time": sgd_time,
             "sample_throughput": len(samples["obs"]) / sgd_time
         }
+
+        self.iter_vars.append({'grad': self.local_evaluator.par_opt.avg_gradient,
+                               'weights': model.get_weights()})
+        with open(self.logdir + '/iter_vars.pkl', 'wb') as file:
+            pickle.dump(self.iter_vars, file)
 
         FilterManager.synchronize(
             self.local_evaluator.filters, self.remote_evaluators)
