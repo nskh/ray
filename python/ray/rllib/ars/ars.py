@@ -41,7 +41,7 @@ DEFAULT_CONFIG = dict(
     sgd_stepsize=0.01,
     shift=0,
     observation_filter='NoFilter',
-    policy='Linear',
+    policy='MLP',
     seed=123,
     eval_rollouts=50,
     env_config={}
@@ -252,6 +252,8 @@ class ARSAgent(agent.Agent):
         self.optimizer = optimizers.SGD(self.w_policy, self.config["sgd_stepsize"])
         print("Initialization of ARS complete.")
 
+        self.iter_vars = []
+
     # FIXME(ev) should return the rewards and some other statistics
     def aggregate_rollouts(self, num_rollouts=None, evaluate=False):
         """ 
@@ -362,6 +364,8 @@ class ARSAgent(agent.Agent):
         g_hat, info_dict = self.train_step()
         t2 = time.time()
         print('total time of one step', t2 - t1)
+
+        self.iter_vars.append({'grad': g_hat, 'weights': self.policy.variables.get_weights()})
 
         self.episodes_so_far += len(info_dict['steps'])
         self.timesteps_so_far += np.sum(info_dict['steps'])
