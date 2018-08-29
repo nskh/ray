@@ -242,7 +242,7 @@ class PPOAgent(Agent):
             "sample_throughput": len(samples["obs"]) / sgd_time
         }
 
-        self.iter_vars.append({'grad': self.local_evaluator.par_opt.avg_gradient,
+        self.iter_vars.append({'grad': model.par_opt.avg_gradient,
                                'weights': model.get_weights()})
         with open(self.logdir + '/iter_vars.pkl', 'wb') as file:
             pickle.dump(self.iter_vars, file)
