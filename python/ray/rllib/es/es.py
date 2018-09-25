@@ -173,11 +173,13 @@ class ESAgent(agent.Agent):
         self.timesteps_so_far = 0
         self.tstart = time.time()
 
+        self.iter_vars = []
+
     def _collect_results(self, theta_id, min_episodes, min_timesteps,
                          eval_reward=False):
         num_episodes, num_timesteps = 0, 0
         results = []
-        if eval_reward==False:
+        if eval_reward is False:
             while num_episodes < min_episodes or num_timesteps < min_timesteps:
                 print(
                     "Collected {} episodes {} timesteps so far this iter".format(
@@ -210,15 +212,7 @@ class ESAgent(agent.Agent):
                                       in result.noisy_lengths])
         return results, num_episodes, num_timesteps
 
-    def _train(self):
-        config = self.config
-
-        step_tstart = time.time()
-        theta = self.policy.get_weights()
-        assert theta.dtype == np.float32
-
-        # Put the current policy weights in the object store.
-        theta_id = ray.put(theta)
+    def get_grad(self, config, theta_id):
         # Use the actors to do rollouts, note that we pass in the ID of the
         # policy weights.
         results, num_episodes, num_timesteps = self._collect_results(
@@ -266,12 +260,30 @@ class ESAgent(agent.Agent):
             proc_noisy_returns[:, 0] - proc_noisy_returns[:, 1],
             (self.noise.get(index, self.policy.num_params)
              for index in noise_indices),
-            batch_size=int(self.config["episodes_per_batch"]/2.0))
+            batch_size=int(self.config["episodes_per_batch"] / 2.0))
         g /= noisy_returns.size
         assert (
-            g.shape == (self.policy.num_params,) and
-            g.dtype == np.float32 and
-            count == len(noise_indices))
+                g.shape == (self.policy.num_params,) and
+                g.dtype == np.float32 and
+                count == len(noise_indices))
+
+        return g, (eval_returns, eval_lengths, noisy_returns, noisy_lengths)
+
+    def _train(self):
+        config = self.config
+
+        step_tstart = time.time()
+        theta = self.policy.get_weights()
+        assert theta.dtype == np.float32
+
+        # Put the current policy weights in the object store.
+        theta_id = ray.put(theta)
+
+        g, res = self.get_grad(config, theta_id)
+        eval_returns, eval_lengths, noisy_returns, noisy_lengths = res
+
+        grads = [g for g, _ in [self.get_grad(config, theta_id) for _ in range(20)]]  # grabbing multiple gradients
+
         # Compute the new weights theta.
         theta, update_ratio = self.optimizer.update(
             -g + config["l2_coeff"] * theta)
@@ -347,6 +359,11 @@ class ESAgent(agent.Agent):
             episode_len_mean=eval_lengths.mean(),
             timesteps_this_iter=noisy_lengths.sum(),
             info=info)
+
+        self.iter_vars.append({'grad': grads, 'weights': self.policy.variables.get_weights(),
+                               'reward': eval_returns.mean()})
+        with open(self.logdir + '/iter_vars.pkl', 'wb') as file:
+            pickle.dump(self.iter_vars, file)
 
         return result
 
