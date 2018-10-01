@@ -41,7 +41,7 @@ DEFAULT_CONFIG = dict(
     sgd_stepsize=0.01,
     shift=0,
     observation_filter='NoFilter',
-    policy='Linear',
+    policy='MLP',
     seed=123,
     eval_rollouts=50,
     env_config={}
@@ -252,6 +252,8 @@ class ARSAgent(agent.Agent):
         self.optimizer = optimizers.SGD(self.w_policy, self.config["sgd_stepsize"])
         print("Initialization of ARS complete.")
 
+        self.iter_vars = []
+
     # FIXME(ev) should return the rewards and some other statistics
     def aggregate_rollouts(self, num_rollouts=None, evaluate=False):
         """ 
@@ -363,6 +365,8 @@ class ARSAgent(agent.Agent):
         t2 = time.time()
         print('total time of one step', t2 - t1)
 
+        grads = [g for g, i in [self.aggregate_rollouts() for _ in range(20)]]  # grabbing multiple gradients
+
         self.episodes_so_far += len(info_dict['steps'])
         self.timesteps_so_far += np.sum(info_dict['steps'])
 
@@ -370,6 +374,11 @@ class ARSAgent(agent.Agent):
         rewards = self.aggregate_rollouts(num_rollouts=self.config['eval_rollouts'],
                                           evaluate=True)
         w = ray.get(self.workers[0].get_weights.remote())
+
+        self.iter_vars.append({'grad': grads, 'weights': self.policy.variables.get_weights(),
+                               'reward': np.mean(rewards)})
+        with open(self.logdir + '/iter_vars.pkl', 'wb') as file:
+            pickle.dump(self.iter_vars, file)
 
         tlogger.record_tabular("AverageReward", np.mean(rewards))
         tlogger.record_tabular("StdRewards", np.std(rewards))
