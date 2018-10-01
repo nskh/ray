@@ -5,7 +5,7 @@ import numpy as np
 import gym
 
 ATARI_OBS_SHAPE = (210, 160, 3)
-ATARI_RAM_OBS_SHAPE = (128,)
+ATARI_RAM_OBS_SHAPE = (128, )
 
 
 class Preprocessor(object):
@@ -33,7 +33,7 @@ class AtariPixelPreprocessor(Preprocessor):
     def _init(self):
         self._grayscale = self._options.get("grayscale", False)
         self._zero_mean = self._options.get("zero_mean", True)
-        self._dim = self._options.get("dim", 80)
+        self._dim = self._options.get("dim", 84)
         self._channel_major = self._options.get("channel_major", False)
         if self._grayscale:
             self.shape = (self._dim, self._dim, 1)
@@ -47,8 +47,8 @@ class AtariPixelPreprocessor(Preprocessor):
     def transform(self, observation):
         """Downsamples images from (210, 160, 3) by the configured factor."""
         scaled = observation[25:-25, :, :]
-        if self._dim < 80:
-            scaled = cv2.resize(scaled, (80, 80))
+        if self._dim < 84:
+            scaled = cv2.resize(scaled, (84, 84))
         # OpenAI: Resize by half, then down to 42x42 (essentially mipmapping).
         # If we resize directly we lose pixels that, when mapped to 42x42,
         # aren't close enough to the pixel boundary.
@@ -69,7 +69,7 @@ class AtariPixelPreprocessor(Preprocessor):
 
 class AtariRamPreprocessor(Preprocessor):
     def _init(self):
-        self.shape = (128,)
+        self.shape = (128, )
 
     def transform(self, observation):
         return (observation - 128) / 128
@@ -77,7 +77,7 @@ class AtariRamPreprocessor(Preprocessor):
 
 class OneHotPreprocessor(Preprocessor):
     def _init(self):
-        self.shape = (self._obs_space.n,)
+        self.shape = (self._obs_space.n, )
 
     def transform(self, observation):
         arr = np.zeros(self._obs_space.n)
@@ -110,13 +110,14 @@ class TupleFlatteningPreprocessor(Preprocessor):
             preprocessor = get_preprocessor(space)(space, self._options)
             self.preprocessors.append(preprocessor)
             size += np.product(preprocessor.shape)
-        self.shape = (size,)
+        self.shape = (size, )
 
     def transform(self, observation):
         assert len(observation) == len(self.preprocessors), observation
         return np.concatenate([
             np.reshape(p.transform(o), [np.product(p.shape)])
-            for (o, p) in zip(observation, self.preprocessors)])
+            for (o, p) in zip(observation, self.preprocessors)
+        ])
 
 
 def get_preprocessor(space):
@@ -124,22 +125,16 @@ def get_preprocessor(space):
 
     legacy_patch_shapes(space)
     obs_shape = space.shape
-    print("Observation shape is {}".format(obs_shape))
 
     if isinstance(space, gym.spaces.Discrete):
-        print("Using one-hot preprocessor for discrete envs.")
         preprocessor = OneHotPreprocessor
     elif obs_shape == ATARI_OBS_SHAPE:
-        print("Assuming Atari pixel env, using AtariPixelPreprocessor.")
         preprocessor = AtariPixelPreprocessor
     elif obs_shape == ATARI_RAM_OBS_SHAPE:
-        print("Assuming Atari ram env, using AtariRamPreprocessor.")
         preprocessor = AtariRamPreprocessor
     elif isinstance(space, gym.spaces.Tuple):
-        print("Using a TupleFlatteningPreprocessor")
         preprocessor = TupleFlatteningPreprocessor
     else:
-        print("Not using any observation preprocessor.")
         preprocessor = NoPreprocessor
 
     return preprocessor

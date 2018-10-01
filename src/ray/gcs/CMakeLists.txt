@@ -1,4 +1,6 @@
-include(${CMAKE_CURRENT_LIST_DIR}/../../common/cmake/Common.cmake)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=unused-function")
+
+include_directories(${CMAKE_SOURCE_DIR}/src/common/thirdparty/ae)
 
 set(GCS_FBS_SRC "${CMAKE_CURRENT_LIST_DIR}/format/gcs.fbs")
 set(OUTPUT_DIR ${CMAKE_CURRENT_LIST_DIR}/format/)
@@ -12,7 +14,7 @@ add_custom_command(
   # flatbuffers message Message, which can be used to store deserialized
   # messages in data structures. This is currently used for ObjectInfo for
   # example.
-  COMMAND ${FLATBUFFERS_COMPILER} -c -o ${OUTPUT_DIR} ${GCS_FBS_SRC} --cpp --gen-object-api --gen-mutable
+  COMMAND ${FLATBUFFERS_COMPILER} -c -o ${OUTPUT_DIR} ${GCS_FBS_SRC} --cpp --gen-object-api --gen-mutable --scoped-enums
   DEPENDS ${FBS_DEPENDS}
   COMMENT "Running flatc compiler on ${GCS_FBS_SRC}"
   VERBATIM)
@@ -20,7 +22,7 @@ add_custom_command(
 add_custom_target(gen_gcs_fbs DEPENDS ${GCS_FBS_OUTPUT_FILES})
 
 # Generate Python bindings for the flatbuffers objects.
-set(PYTHON_OUTPUT_DIR ${CMAKE_BINARY_DIR}/generated/)
+set(PYTHON_OUTPUT_DIR ${CMAKE_CURRENT_LIST_DIR}/../../../python/ray/core/generated/)
 add_custom_command(
   TARGET gen_gcs_fbs
   COMMAND ${FLATBUFFERS_COMPILER} -p -o ${PYTHON_OUTPUT_DIR} ${GCS_FBS_SRC}

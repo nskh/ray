@@ -1,62 +1,71 @@
-""" Run script for multiagent cartpole env. Each agent outputs a
-action whose mean is the actual action. This is a multiagent
-example of an extremely simple task meant to be used for testing
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+"""Simple example of setting up a multi-agent policy mapping.
+
+Control the number of agents and policies via --num-agents and --num-policies.
+
+This works with hundreds of agents and policies, but note that initializing
+many TF policy graphs will take some time.
+
+Also, TF evals might slow down with large numbers of policies. To debug TF
+execution, set the TF_TIMELINE_DIR environment variable.
 """
 
+import argparse
 import gym
-from gym.envs.registration import register
+import random
 
 import ray
-import ray.rllib.ppo as ppo
-from ray.tune.registry import register_env
+from ray import tune
+from ray.rllib.agents.pg.pg_policy_graph import PGPolicyGraph
+from ray.rllib.test.test_multi_agent_env import MultiCartpole
 from ray.tune import run_experiments
+from ray.tune.registry import register_env
 
-env_name = "MultiAgentCartPoleEnv"
+parser = argparse.ArgumentParser()
 
-env_version_num = 0
-env_name = env_name + '-v' + str(env_version_num)
+parser.add_argument("--num-agents", type=int, default=4)
+parser.add_argument("--num-policies", type=int, default=2)
+parser.add_argument("--num-iters", type=int, default=20)
 
+if __name__ == "__main__":
+    args = parser.parse_args()
+    ray.init()
 
-def pass_params_to_gym(env_name):
-    global env_version_num
+    # Simple environment with `num_agents` independent cartpole entities
+    register_env("multi_cartpole", lambda _: MultiCartpole(args.num_agents))
+    single_env = gym.make("CartPole-v0")
+    obs_space = single_env.observation_space
+    act_space = single_env.action_space
 
-    register(
-        id=env_name,
-        entry_point='ray.rllib.examples:' + "MultiAgentCartPoleEnv",
-        max_episode_steps=config['horizon'],
-        kwargs={}
-    )
+    def gen_policy():
+        config = {
+            "gamma": random.choice([0.5, 0.8, 0.9, 0.95, 0.99]),
+            "n_step": random.choice([1, 2, 3, 4, 5]),
+        }
+        return (PGPolicyGraph, obs_space, act_space, config)
 
+    # Setup PG with an ensemble of `num_policies` different policy graphs
+    policy_graphs = {
+        "policy_{}".format(i): gen_policy()
+        for i in range(args.num_policies)
+    }
+    policy_ids = list(policy_graphs.keys())
 
-def create_env(env_config):
-    pass_params_to_gym(env_name)
-    env = gym.envs.make(env_name)
-    return env
-
-
-if __name__ == '__main__':
-    register_env(env_name, lambda env_config: create_env(env_config))
-    config = ppo.DEFAULT_CONFIG.copy()
-    config["timesteps_per_batch"] = 100
-    num_cpus = 2
-    ray.init(redirect_output=False)
-    options = {"multiagent_obs_shapes": [4, 4],
-               "multiagent_act_shapes": [1, 1],
-               "multiagent_shared_model": False,
-               "multiagent_fcnet_hiddens": [[32, 32]] * 2}
-    config["model"].update({"custom_options": options})
-    config["horizon"] = 200
-    register_env("MultiAgentCartPoleEnv-v0", create_env)
-    trials = run_experiments({
-            "pendulum_tests": {
-                "run": "PPO",
-                "env": "MultiAgentCartPoleEnv-v0",
-                "config": {
-                   **config
-                },
-                "checkpoint_freq": 20,
-                "max_failures": 999,
-                "stop": {"training_iteration": 1},
-                "trial_resources": {"cpu": 1, "extra_cpu": 0}
+    run_experiments({
+        "test": {
+            "run": "PG",
+            "env": "multi_cartpole",
+            "stop": {
+                "training_iteration": args.num_iters
             },
-        })
+            "config": {
+                "multiagent": {
+                    "policy_graphs": policy_graphs,
+                    "policy_mapping_fn": tune.function(
+                        lambda agent_id: random.choice(policy_ids)),
+                },
+            },
+        }
+    })

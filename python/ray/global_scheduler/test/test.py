@@ -18,37 +18,32 @@ import ray.plasma as plasma
 from ray.plasma.utils import create_object
 from ray import services
 from ray.experimental import state
+import ray.ray_constants as ray_constants
 import pyarrow as pa
 
 USE_VALGRIND = False
 PLASMA_STORE_MEMORY = 1000000000
-ID_SIZE = 20
 NUM_CLUSTER_NODES = 2
 
-NIL_WORKER_ID = 20 * b"\xff"
-NIL_OBJECT_ID = 20 * b"\xff"
-NIL_ACTOR_ID = 20 * b"\xff"
-
-# These constants are an implementation detail of ray_redis_module.cc, so this
-# must be kept in sync with that file.
-DB_CLIENT_PREFIX = "CL:"
-TASK_PREFIX = "TT:"
+NIL_WORKER_ID = ray_constants.ID_SIZE * b"\xff"
+NIL_OBJECT_ID = ray_constants.ID_SIZE * b"\xff"
+NIL_ACTOR_ID = ray_constants.ID_SIZE * b"\xff"
 
 
 def random_driver_id():
-    return local_scheduler.ObjectID(np.random.bytes(ID_SIZE))
+    return local_scheduler.ObjectID(np.random.bytes(ray_constants.ID_SIZE))
 
 
 def random_task_id():
-    return local_scheduler.ObjectID(np.random.bytes(ID_SIZE))
+    return local_scheduler.ObjectID(np.random.bytes(ray_constants.ID_SIZE))
 
 
 def random_function_id():
-    return local_scheduler.ObjectID(np.random.bytes(ID_SIZE))
+    return local_scheduler.ObjectID(np.random.bytes(ray_constants.ID_SIZE))
 
 
 def random_object_id():
-    return local_scheduler.ObjectID(np.random.bytes(ID_SIZE))
+    return local_scheduler.ObjectID(np.random.bytes(ray_constants.ID_SIZE))
 
 
 def new_port():
@@ -101,7 +96,8 @@ class TestGlobalScheduler(unittest.TestCase):
                 static_resources={"CPU": 10})
             # Connect to the scheduler.
             local_scheduler_client = local_scheduler.LocalSchedulerClient(
-                local_scheduler_name, NIL_WORKER_ID, False)
+                local_scheduler_name, NIL_WORKER_ID, False, random_task_id(),
+                False)
             self.local_scheduler_clients.append(local_scheduler_client)
             self.local_scheduler_pids.append(p4)
 
@@ -193,7 +189,7 @@ class TestGlobalScheduler(unittest.TestCase):
         assert (db_client_id is not None)
 
     @unittest.skipIf(
-        os.environ.get('RAY_USE_NEW_GCS', False),
+        os.environ.get("RAY_USE_NEW_GCS", False),
         "New GCS API doesn't have a Python API yet.")
     def test_integration_single_task(self):
         # There should be three db clients, the global scheduler, the local
@@ -285,13 +281,10 @@ class TestGlobalScheduler(unittest.TestCase):
                     for task_entry in task_entries.values()
                 ]
                 self.assertTrue(
-                    all([
-                        status in [
-                            state.TASK_STATUS_WAITING,
-                            state.TASK_STATUS_SCHEDULED,
-                            state.TASK_STATUS_QUEUED
-                        ] for status in task_statuses
-                    ]))
+                    all(status in [
+                        state.TASK_STATUS_WAITING, state.TASK_STATUS_SCHEDULED,
+                        state.TASK_STATUS_QUEUED
+                    ] for status in task_statuses))
                 num_tasks_done = task_statuses.count(state.TASK_STATUS_QUEUED)
                 num_tasks_scheduled = task_statuses.count(
                     state.TASK_STATUS_SCHEDULED)
@@ -302,10 +295,8 @@ class TestGlobalScheduler(unittest.TestCase):
                       "tasks queued = {}, retries left = {}".format(
                           len(task_entries), num_tasks_waiting,
                           num_tasks_scheduled, num_tasks_done, num_retries))
-                if all([
-                        status == state.TASK_STATUS_QUEUED
-                        for status in task_statuses
-                ]):
+                if all(status == state.TASK_STATUS_QUEUED
+                       for status in task_statuses):
                     # We're done, so pass.
                     break
             num_retries -= 1
@@ -316,13 +307,13 @@ class TestGlobalScheduler(unittest.TestCase):
         self.assertEqual(num_tasks_done + num_tasks_waiting, num_tasks)
 
     @unittest.skipIf(
-        os.environ.get('RAY_USE_NEW_GCS', False),
+        os.environ.get("RAY_USE_NEW_GCS", False),
         "New GCS API doesn't have a Python API yet.")
     def test_integration_many_tasks_handler_sync(self):
         self.integration_many_tasks_helper(timesync=True)
 
     @unittest.skipIf(
-        os.environ.get('RAY_USE_NEW_GCS', False),
+        os.environ.get("RAY_USE_NEW_GCS", False),
         "New GCS API doesn't have a Python API yet.")
     def test_integration_many_tasks(self):
         # More realistic case: should handle out of order object and task

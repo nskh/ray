@@ -29,7 +29,6 @@ def create_env(env_config):
     env = gym.envs.make(env_name+'-v0')
     return env
 
-
 if __name__ == '__main__':
     experiments = {}
 
@@ -51,10 +50,9 @@ if __name__ == '__main__':
 
     num_failures = 0
     for t in trials:
-        if (t.last_result.episode_reward_mean <
+        if (t.last_result["episode_reward_mean"] <
                 t.stopping_criterion["episode_reward_mean"]):
             num_failures += 1
 
     if num_failures:
-        raise Exception(
-            "{} trials did not converge".format(num_failures))
+        raise Exception("{} trials did not converge".format(num_failures))

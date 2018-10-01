@@ -1,10 +1,10 @@
 Cloud Setup and Auto-Scaling
 ============================
 
-The ``ray create_or_update`` command starts an AWS Ray cluster from your personal computer. Once the cluster is up, you can then SSH into it to run Ray programs.
+The ``ray up`` command starts or updates an AWS or GCP Ray cluster from your personal computer. Once the cluster is up, you can then SSH into it to run Ray programs.
 
-Quick start
------------
+Quick start (AWS)
+-----------------
 
 First, install boto (``pip install boto3``) and configure your AWS credentials in ``~/.aws/credentials``,
 as described in `the boto docs <http://boto3.readthedocs.io/en/latest/guide/configuration.html>`__.
@@ -12,33 +12,112 @@ as described in `the boto docs <http://boto3.readthedocs.io/en/latest/guide/conf
 Then you're ready to go. The provided `ray/python/ray/autoscaler/aws/example-full.yaml <https://github.com/ray-project/ray/tree/master/python/ray/autoscaler/aws/example-full.yaml>`__ cluster config file will create a small cluster with a m5.large head node (on-demand) configured to autoscale up to two m5.large `spot workers <https://aws.amazon.com/ec2/spot/>`__.
 
 Try it out by running these commands from your personal computer. Once the cluster is started, you can then
-SSH into the head node, ``source activate tensorflow_p36``, and then run Ray programs with ``ray.init(redis_address=ray.services.get_node_ip_address() + ":6379")``.
+SSH into the head node, ``source activate tensorflow_p36``, and then run Ray programs with ``ray.init(redis_address="localhost:6379")``.
 
 .. code-block:: bash
 
     # Create or update the cluster. When the command finishes, it will print
     # out the command that can be used to SSH into the cluster head node.
-    $ ray create_or_update ray/python/ray/autoscaler/aws/example-full.yaml
+    $ ray up ray/python/ray/autoscaler/aws/example-full.yaml
 
     # Reconfigure autoscaling behavior without interrupting running jobs
-    $ ray create_or_update ray/python/ray/autoscaler/aws/example-full.yaml \
+    $ ray up ray/python/ray/autoscaler/aws/example-full.yaml \
         --max-workers=N --no-restart
 
     # Teardown the cluster
-    $ ray teardown ray/python/ray/autoscaler/aws/example-full.yaml
+    $ ray down ray/python/ray/autoscaler/aws/example-full.yaml
 
-To run connect to applications running on the cluster (e.g. Jupyter notebook) using a web browser, you can forward the port to your local machine using SSH:
+Quick start (GCP)
+-----------------
+
+First, install the Google API client (``pip install google-api-python-client``), set up your GCP credentials, and create a new GCP project.
+
+Then you're ready to go. The provided `ray/python/ray/autoscaler/gcp/example-full.yaml <https://github.com/ray-project/ray/tree/master/python/ray/autoscaler/gcp/example-full.yaml>`__ cluster config file will create a small cluster with a n1-standard-2 head node (on-demand) configured to autoscale up to two n1-standard-2 `preemptible workers <https://cloud.google.com/preemptible-vms/>`__. Note that you'll need to fill in your project id in those templates.
+
+Try it out by running these commands from your personal computer. Once the cluster is started, you can then
+SSH into the head node and then run Ray programs with ``ray.init(redis_address="localhost:6379")``.
 
 .. code-block:: bash
 
-    $ ssh -L 8899:localhost:8899 -i <key> <user>@<addr> 'source ~/anaconda3/bin/activate tensorflow_p36 && jupyter notebook --port=8899'
+    # Create or update the cluster. When the command finishes, it will print
+    # out the command that can be used to SSH into the cluster head node.
+    $ ray up ray/python/ray/autoscaler/gcp/example-full.yaml
+
+    # Reconfigure autoscaling behavior without interrupting running jobs
+    $ ray up ray/python/ray/autoscaler/gcp/example-full.yaml \
+        --max-workers=N --no-restart
+
+    # Teardown the cluster
+    $ ray down ray/python/ray/autoscaler/gcp/example-full.yaml
+
+Running commands on new and existing clusters
+---------------------------------------------
+
+You can use ``ray exec`` to conveniently run commands on clusters. Note that scripts you run should connect to Ray via ``ray.init(redis_address="localhost:6379")``.
+
+.. code-block:: bash
+
+    # Run a command on the cluster
+    $ ray exec cluster.yaml 'echo "hello world"'
+
+    # Run a command on the cluster, starting it if needed
+    $ ray exec cluster.yaml 'echo "hello world"' --start
+
+    # Run a command on the cluster, stopping the cluster after it finishes
+    $ ray exec cluster.yaml 'echo "hello world"' --stop
+
+    # Run a command on a new cluster called 'experiment-1', stopping it after
+    $ ray exec cluster.yaml 'echo "hello world"' \
+        --start --stop --cluster-name experiment-1
+
+    # Run a command in a detached tmux session
+    $ ray exec cluster.yaml 'echo "hello world"' --tmux
+
+    # Run a command in a screen (experimental)
+    $ ray exec cluster.yaml 'echo "hello world"' --screen
+
+Attaching to the cluster
+------------------------
+
+You can use ``ray attach`` to attach to an interactive console on the cluster.
+
+.. code-block:: bash
+
+    # Open a screen on the cluster
+    $ ray attach cluster.yaml
+
+    # Open a screen on a new cluster called 'session-1'
+    $ ray attach cluster.yaml --start --cluster-name=session-1
+
+    # Attach to tmux session on cluster (creates a new one if none available)
+    $ ray attach cluster.yaml --tmux
+
+
+Port-forwarding applications
+----------------------------
+
+To run connect to applications running on the cluster (e.g. Jupyter notebook) using a web browser, you can use the port-forward option for ``ray exec``. The local port opened is the same as the remote port:
+
+.. code-block:: bash
+
+    $ ray exec cluster.yaml --port-forward=8899 'source ~/anaconda3/bin/activate tensorflow_p36 && jupyter notebook --port=8899'
+
+Manually synchronizing files
+----------------------------
+
+To download or upload files to the cluster head node, use ``ray rsync_down`` or ``ray rsync_up``:
+
+.. code-block:: bash
+
+    $ ray rsync_down cluster.yaml '/path/on/cluster' '/local/path'
+    $ ray rsync_up cluster.yaml '/local/path' '/path/on/cluster'
 
 Updating your cluster
 ---------------------
 
-When you run ``ray create_or_update`` with an existing cluster, the command checks if the local configuration differs from the applied configuration of the cluster. This includes any changes to synced files specified in the ``file_mounts`` section of the config. If so, the new files and config will be uploaded to the cluster. Following that, Ray services will be restarted.
+When you run ``ray up`` with an existing cluster, the command checks if the local configuration differs from the applied configuration of the cluster. This includes any changes to synced files specified in the ``file_mounts`` section of the config. If so, the new files and config will be uploaded to the cluster. Following that, Ray services will be restarted.
 
-You can also run ``ray create_or_update`` to restart a cluster if it seems to be in a bad state (this will restart all Ray services even if there are no config changes).
+You can also run ``ray up`` to restart a cluster if it seems to be in a bad state (this will restart all Ray services even if there are no config changes).
 
 If you don't want the update to restart services (e.g. because the changes don't require a restart), pass ``--no-restart`` to the update call.
 
@@ -52,14 +131,14 @@ Autoscaling
 
 Ray clusters come with a load-based auto-scaler. When cluster resource usage exceeds a configurable threshold (80% by default), new nodes will be launched up the specified ``max_workers`` limit. When nodes are idle for more than a timeout, they will be removed, down to the ``min_workers`` limit. The head node is never removed.
 
-The default idle timeout is 5 minutes. This is to prevent excessive node churn which could impact performance and increase costs (in AWS there is a minimum billing charge of 1 minute per instance, after which usage is billed by the second).
+The default idle timeout is 5 minutes. This is to prevent excessive node churn which could impact performance and increase costs (in AWS / GCP there is a minimum billing charge of 1 minute per instance, after which usage is billed by the second).
 
 Monitoring cluster status
 -------------------------
 
 You can monitor cluster usage and auto-scaling status by tailing the autoscaling logs in ``/tmp/raylogs/monitor-*``.
 
-The Ray autoscaler also reports per-node status in the form of instance tags. In the AWS console, you can click on a Node, go the the "Tags" pane, and add the ``ray:NodeStatus`` tag as a column. This lets you see per-node statuses at a glance:
+The Ray autoscaler also reports per-node status in the form of instance tags. In your cloud provider console, you can click on a Node, go the the "Tags" pane, and add the ``ray-node-status`` tag as a column. This lets you see per-node statuses at a glance:
 
 .. image:: autoscaler-status.png
 
@@ -68,7 +147,7 @@ Customizing cluster setup
 
 You are encouraged to copy the example YAML file and modify it to your needs. This may include adding additional setup commands to install libraries or sync local data files.
 
-.. note:: After you have customized the nodes, it is also a good idea to create a new machine image (AMI) and use that in the config file. This reduces worker setup time, improving the efficiency of auto-scaling.
+.. note:: After you have customized the nodes, it is also a good idea to create a new machine image and use that in the config file. This reduces worker setup time, improving the efficiency of auto-scaling.
 
 The setup commands you use should ideally be *idempotent*, that is, can be run more than once. This allows Ray to update nodes after they have been created. You can usually make commands idempotent with small modifications, e.g. ``git clone foo`` can be rewritten as ``test -e foo || git clone foo`` which checks if the repo is already cloned first.
 
@@ -89,11 +168,11 @@ A common use case is syncing a particular local git branch to all workers of the
         - test -e <REPO_NAME> || git clone https://github.com/<REPO_ORG>/<REPO_NAME>.git
         - cd <REPO_NAME> && git fetch && git checkout `cat /tmp/current_branch_sha`
 
-This tells ``ray create_or_update`` to sync the current git branch SHA from your personal computer to a temporary file on the cluster (assuming you've pushed the branch head already). Then, the setup commands read that file to figure out which SHA they should checkout on the nodes. Note that each command runs in its own session. The final workflow to update the cluster then becomes just this:
+This tells ``ray up`` to sync the current git branch SHA from your personal computer to a temporary file on the cluster (assuming you've pushed the branch head already). Then, the setup commands read that file to figure out which SHA they should checkout on the nodes. Note that each command runs in its own session. The final workflow to update the cluster then becomes just this:
 
 1. Make local changes to a git branch
 2. Commit the changes with ``git commit`` and ``git push``
-3. Update files on your Ray cluster with ``ray create_or_update``
+3. Update files on your Ray cluster with ``ray up``
 
 Common cluster configurations
 -----------------------------
@@ -148,7 +227,7 @@ with GPU worker nodes instead.
 
 .. code-block:: yaml
 
-    min_workers: 0
+    min_workers: 1  # must have at least 1 GPU worker (issue #2106)
     max_workers: 10
     head_node:
         InstanceType: m4.large

@@ -10,11 +10,24 @@ import traceback
 
 import ray.cloudpickle as pickle
 import ray.local_scheduler
+import ray.ray_constants as ray_constants
 import ray.signature as signature
 import ray.worker
-from ray.utils import _random_string, is_cython, push_error_to_driver
+from ray.utils import (
+    decode,
+    _random_string,
+    check_oversized_pickle,
+    is_cython,
+    push_error_to_driver,
+)
 
 DEFAULT_ACTOR_METHOD_NUM_RETURN_VALS = 1
+
+
+def is_classmethod(f):
+    """Returns whether the given method is a classmethod."""
+
+    return hasattr(f, "__self__") and f.__self__ is not None
 
 
 def compute_actor_handle_id(actor_handle_id, num_forks):
@@ -35,7 +48,7 @@ def compute_actor_handle_id(actor_handle_id, num_forks):
     handle_id_hash.update(actor_handle_id.id())
     handle_id_hash.update(str(num_forks).encode("ascii"))
     handle_id = handle_id_hash.digest()
-    assert len(handle_id) == 20
+    assert len(handle_id) == ray_constants.ID_SIZE
     return ray.ObjectID(handle_id)
 
 
@@ -67,7 +80,7 @@ def compute_actor_handle_id_non_forked(actor_id, actor_handle_id,
     handle_id_hash.update(actor_handle_id.id())
     handle_id_hash.update(current_task_id.id())
     handle_id = handle_id_hash.digest()
-    assert len(handle_id) == 20
+    assert len(handle_id) == ray_constants.ID_SIZE
     return ray.ObjectID(handle_id)
 
 
@@ -97,7 +110,7 @@ def compute_actor_method_function_id(class_name, attr):
     function_id_hash.update(class_name.encode("ascii"))
     function_id_hash.update(attr.encode("ascii"))
     function_id = function_id_hash.digest()
-    assert len(function_id) == 20
+    assert len(function_id) == ray_constants.ID_SIZE
     return ray.ObjectID(function_id)
 
 
@@ -157,8 +170,8 @@ def save_and_log_checkpoint(worker, actor):
         traceback_str = ray.utils.format_error_message(traceback.format_exc())
         # Log the error message.
         ray.utils.push_error_to_driver(
-            worker.redis_client,
-            "checkpoint",
+            worker,
+            ray_constants.CHECKPOINT_PUSH_ERROR,
             traceback_str,
             driver_id=worker.task_driver_id.id(),
             data={
@@ -181,8 +194,8 @@ def restore_and_log_checkpoint(worker, actor):
         traceback_str = ray.utils.format_error_message(traceback.format_exc())
         # Log the error message.
         ray.utils.push_error_to_driver(
-            worker.redis_client,
-            "checkpoint",
+            worker,
+            ray_constants.CHECKPOINT_PUSH_ERROR,
             traceback_str,
             driver_id=worker.task_driver_id.id(),
             data={
@@ -242,7 +255,10 @@ def make_actor_method_executor(worker, method_name, method, actor_imported):
 
         # Execute the assigned method and save a checkpoint if necessary.
         try:
-            method_returns = method(actor, *args)
+            if is_classmethod(method):
+                method_returns = method(*args)
+            else:
+                method_returns = method(actor, *args)
         except Exception:
             # Save the checkpoint before allowing the method exception to be
             # thrown.
@@ -277,10 +293,10 @@ def fetch_and_register_actor(actor_class_key, worker):
              "checkpoint_interval", "actor_method_names"
          ])
 
-    class_name = class_name.decode("ascii")
-    module = module.decode("ascii")
+    class_name = decode(class_name)
+    module = decode(module)
     checkpoint_interval = int(checkpoint_interval)
-    actor_method_names = json.loads(actor_method_names.decode("ascii"))
+    actor_method_names = json.loads(decode(actor_method_names))
 
     # Create a temporary actor with some temporary methods so that if the actor
     # fails to be unpickled, the temporary actor can be used (just to produce
@@ -320,8 +336,8 @@ def fetch_and_register_actor(actor_class_key, worker):
         traceback_str = ray.utils.format_error_message(traceback.format_exc())
         # Log the error message.
         push_error_to_driver(
-            worker.redis_client,
-            "register_actor_signatures",
+            worker,
+            ray_constants.REGISTER_ACTOR_PUSH_ERROR,
             traceback_str,
             driver_id,
             data={"actor_id": actor_id_str})
@@ -383,6 +399,9 @@ def export_actor_class(class_id, Class, actor_method_names,
         "actor_method_names": json.dumps(list(actor_method_names))
     }
 
+    check_oversized_pickle(actor_class_info["class"],
+                           actor_class_info["class_name"], "actor", worker)
+
     if worker.mode is None:
         # This means that 'ray.init()' has not been called yet and so we must
         # cache the actor class definition and export it when 'ray.init()' is
@@ -402,6 +421,24 @@ def export_actor_class(class_id, Class, actor_method_names,
 
 
 def method(*args, **kwargs):
+    """Annotate an actor method.
+
+    .. code-block:: python
+
+        @ray.remote
+        class Foo(object):
+            @ray.method(num_return_vals=2)
+            def bar(self):
+                return 1, 2
+
+        f = Foo.remote()
+
+        _, _ = f.bar.remote()
+
+    Args:
+        num_return_vals: The number of object IDs that should be returned by
+            invocations of this actor method.
+    """
     assert len(args) == 0
     assert len(kwargs) == 1
     assert "num_return_vals" in kwargs
@@ -491,8 +528,8 @@ class ActorClass(object):
         # Extract the signatures of each of the methods. This will be used
         # to catch some errors if the methods are called with inappropriate
         # arguments.
-        self._method_signatures = dict()
-        self._actor_method_num_return_vals = dict()
+        self._method_signatures = {}
+        self._actor_method_num_return_vals = {}
         for method_name, method in self._actor_methods:
             # Print a warning message if the method signature is not
             # supported. We don't raise an exception because if the actor
@@ -500,7 +537,7 @@ class ActorClass(object):
             # don't support, there may not be much the user can do about it.
             signature.check_signature_supported(method, warn=True)
             self._method_signatures[method_name] = signature.extract_signature(
-                method, ignore_first=True)
+                method, ignore_first=not is_classmethod(method))
 
             # Set the default number of return values for this method.
             if hasattr(method, "__ray_num_return_vals__"):
@@ -557,7 +594,6 @@ class ActorClass(object):
             A handle to the newly created actor.
         """
         worker = ray.worker.get_global_worker()
-        ray.worker.check_main_thread()
         if worker.mode is None:
             raise Exception("Actors cannot be created before ray.init() "
                             "has been called.")
@@ -569,10 +605,10 @@ class ActorClass(object):
         # updated to reflect the new invocation.
         actor_cursor = None
 
-        # Do not export the actor class or the actor if run in PYTHON_MODE
+        # Do not export the actor class or the actor if run in LOCAL_MODE
         # Instead, instantiate the actor locally and add it to the worker's
         # dictionary
-        if worker.mode == ray.PYTHON_MODE:
+        if worker.mode == ray.LOCAL_MODE:
             worker.actors[actor_id] = self._modified_class.__new__(
                 self._modified_class)
         else:
@@ -736,7 +772,6 @@ class ActorHandle(object):
         worker = ray.worker.get_global_worker()
 
         worker.check_connected()
-        ray.worker.check_main_thread()
 
         function_signature = self._ray_method_signatures[method_name]
         if args is None:
@@ -745,9 +780,9 @@ class ActorHandle(object):
             kwargs = {}
         args = signature.extend_args(function_signature, args, kwargs)
 
-        # Execute functions locally if Ray is run in PYTHON_MODE
+        # Execute functions locally if Ray is run in LOCAL_MODE
         # Copy args to prevent the function from mutating them.
-        if worker.mode == ray.PYTHON_MODE:
+        if worker.mode == ray.LOCAL_MODE:
             return getattr(worker.actors[self._ray_actor_id],
                            method_name)(*copy.deepcopy(args))
 
@@ -822,7 +857,8 @@ class ActorHandle(object):
         return object.__getattribute__(self, attr)
 
     def __repr__(self):
-        return "Actor(" + self._ray_actor_id.hex() + ")"
+        return "Actor({}, {})".format(self._ray_class_name,
+                                      self._ray_actor_id.hex())
 
     def __del__(self):
         """Kill the worker that is running this actor."""
@@ -857,32 +893,23 @@ class ActorHandle(object):
             A dictionary of the information needed to reconstruct the object.
         """
         state = {
-            "actor_id":
-            self._ray_actor_id.id(),
-            "class_name":
-            self._ray_class_name,
-            "actor_forks":
-            self._ray_actor_forks,
-            "actor_cursor":
-            self._ray_actor_cursor.id(),
-            "actor_counter":
-            0,  # Reset the actor counter.
-            "actor_method_names":
-            self._ray_actor_method_names,
-            "method_signatures":
-            self._ray_method_signatures,
-            "method_num_return_vals":
-            self._ray_method_num_return_vals,
-            "actor_creation_dummy_object_id":
-            self._ray_actor_creation_dummy_object_id.id(),
-            "actor_method_cpus":
-            self._ray_actor_method_cpus,
-            "actor_driver_id":
-            self._ray_actor_driver_id.id(),
-            "previous_actor_handle_id":
-            self._ray_actor_handle_id.id(),
-            "ray_forking":
-            ray_forking
+            "actor_id": self._ray_actor_id.id(),
+            "class_name": self._ray_class_name,
+            "actor_forks": self._ray_actor_forks,
+            "actor_cursor": self._ray_actor_cursor.id()
+            if self._ray_actor_cursor is not None else None,
+            "actor_counter": 0,  # Reset the actor counter.
+            "actor_method_names": self._ray_actor_method_names,
+            "method_signatures": self._ray_method_signatures,
+            "method_num_return_vals": self._ray_method_num_return_vals,
+            "actor_creation_dummy_object_id": self.
+            _ray_actor_creation_dummy_object_id.id()
+            if self._ray_actor_creation_dummy_object_id is not None else None,
+            "actor_method_cpus": self._ray_actor_method_cpus,
+            "actor_driver_id": self._ray_actor_driver_id.id(),
+            "previous_actor_handle_id": self._ray_actor_handle_id.id()
+            if self._ray_actor_handle_id else None,
+            "ray_forking": ray_forking
         }
 
         if ray_forking:
@@ -900,7 +927,6 @@ class ActorHandle(object):
         """
         worker = ray.worker.get_global_worker()
         worker.check_connected()
-        ray.worker.check_main_thread()
 
         if state["ray_forking"]:
             actor_handle_id = compute_actor_handle_id(
@@ -916,12 +942,14 @@ class ActorHandle(object):
         self.__init__(
             ray.ObjectID(state["actor_id"]),
             state["class_name"],
-            ray.ObjectID(state["actor_cursor"]),
+            ray.ObjectID(state["actor_cursor"])
+            if state["actor_cursor"] is not None else None,
             state["actor_counter"],
             state["actor_method_names"],
             state["method_signatures"],
             state["method_num_return_vals"],
-            ray.ObjectID(state["actor_creation_dummy_object_id"]),
+            ray.ObjectID(state["actor_creation_dummy_object_id"])
+            if state["actor_creation_dummy_object_id"] is not None else None,
             state["actor_method_cpus"],
             actor_driver_id,
             actor_handle_id=actor_handle_id,
@@ -950,7 +978,7 @@ def make_actor(cls, num_cpus, num_gpus, resources, actor_method_cpus,
     class Class(cls):
         def __ray_terminate__(self):
             worker = ray.worker.get_global_worker()
-            if worker.mode != ray.PYTHON_MODE:
+            if worker.mode != ray.LOCAL_MODE:
                 # Disconnect the worker from the local scheduler. The point of
                 # this is so that when the worker kills itself below, the local
                 # scheduler won't push an error message to the driver.

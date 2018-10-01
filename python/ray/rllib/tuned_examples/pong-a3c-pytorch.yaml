@@ -6,8 +6,7 @@ pong-a3c-pytorch-cnn:
         extra_cpu: 16
     config:
         num_workers: 16
-        batch_size: 20
-        use_lstm: false
+        sample_batch_size: 20
         use_pytorch: true
         vf_loss_coeff: 0.5
         entropy_coeff: -0.01
@@ -16,8 +15,8 @@ pong-a3c-pytorch-cnn:
         lambda: 1.0
         lr: 0.0001
         observation_filter: NoFilter
-        reward_filter: NoFilter
         model:
+            use_lstm: false
             channel_major: true
             dim: 80
             grayscale: true
