@@ -244,8 +244,12 @@ class PPOAgent(Agent):
 
         self.iter_vars.append({'grad': model.par_opt.avg_gradient,
                                'weights': model.get_weights()})
+
         with open(self.logdir + '/iter_vars.pkl', 'wb') as file:
-            pickle.dump(self.iter_vars, file)
+            try:
+                pickle.dump(self.iter_vars, file)
+            except:
+                import ipdb; ipdb.set_trace(s)
 
         FilterManager.synchronize(
             self.local_evaluator.filters, self.remote_evaluators)
