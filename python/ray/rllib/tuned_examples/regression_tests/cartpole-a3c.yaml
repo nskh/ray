@@ -7,5 +7,5 @@ cartpole-a3c:
     trial_resources:
         cpu: 2
     config:
-        num_workers: 4
+        num_workers: 1
         gamma: 0.95

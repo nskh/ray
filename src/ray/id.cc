@@ -1,12 +1,22 @@
 #include "ray/id.h"
 
 #include <limits.h>
+
+#include <chrono>
+#include <mutex>
 #include <random>
 
+#include "common/common.h"
 #include "ray/constants.h"
 #include "ray/status.h"
 
 namespace ray {
+
+std::mt19937 RandomlySeededMersenneTwister() {
+  auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+  std::mt19937 seeded_engine(seed);
+  return seeded_engine;
+}
 
 UniqueID::UniqueID(const plasma::UniqueID &from) {
   std::memcpy(&id_, from.data(), kUniqueIDSize);
@@ -15,9 +25,15 @@ UniqueID::UniqueID(const plasma::UniqueID &from) {
 UniqueID UniqueID::from_random() {
   UniqueID id;
   uint8_t *data = id.mutable_data();
-  std::random_device engine;
+  // NOTE(pcm): The right way to do this is to have one std::mt19937 per
+  // thread (using the thread_local keyword), but that's not supported on
+  // older versions of macOS (see https://stackoverflow.com/a/29929949)
+  static std::mutex random_engine_mutex;
+  std::lock_guard<std::mutex> lock(random_engine_mutex);
+  static std::mt19937 generator = RandomlySeededMersenneTwister();
+  std::uniform_int_distribution<uint32_t> dist(0, std::numeric_limits<uint8_t>::max());
   for (int i = 0; i < kUniqueIDSize; i++) {
-    data[i] = static_cast<uint8_t>(engine());
+    data[i] = static_cast<uint8_t>(dist(generator));
   }
   return id;
 }
@@ -72,7 +88,7 @@ std::string UniqueID::hex() const {
   return result;
 }
 
-plasma::UniqueID UniqueID::to_plasma_id() {
+plasma::UniqueID UniqueID::to_plasma_id() const {
   plasma::UniqueID result;
   std::memcpy(result.mutable_data(), &id_, kUniqueIDSize);
   return result;
@@ -82,12 +98,58 @@ bool UniqueID::operator==(const UniqueID &rhs) const {
   return std::memcmp(data(), rhs.data(), kUniqueIDSize) == 0;
 }
 
-size_t UniqueID::hash() const {
-  size_t result;
-  // Skip the bytes for the object prefix.
-  std::memcpy(&result, id_ + (kObjectIdIndexSize / CHAR_BIT), sizeof(size_t));
-  return result;
+bool UniqueID::operator!=(const UniqueID &rhs) const { return !(*this == rhs); }
+
+// This code is from https://sites.google.com/site/murmurhash/
+// and is public domain.
+uint64_t MurmurHash64A(const void *key, int len, unsigned int seed) {
+  const uint64_t m = 0xc6a4a7935bd1e995;
+  const int r = 47;
+
+  uint64_t h = seed ^ (len * m);
+
+  const uint64_t *data = reinterpret_cast<const uint64_t *>(key);
+  const uint64_t *end = data + (len / 8);
+
+  while (data != end) {
+    uint64_t k = *data++;
+
+    k *= m;
+    k ^= k >> r;
+    k *= m;
+
+    h ^= k;
+    h *= m;
+  }
+
+  const unsigned char *data2 = reinterpret_cast<const unsigned char *>(data);
+
+  switch (len & 7) {
+  case 7:
+    h ^= uint64_t(data2[6]) << 48;
+  case 6:
+    h ^= uint64_t(data2[5]) << 40;
+  case 5:
+    h ^= uint64_t(data2[4]) << 32;
+  case 4:
+    h ^= uint64_t(data2[3]) << 24;
+  case 3:
+    h ^= uint64_t(data2[2]) << 16;
+  case 2:
+    h ^= uint64_t(data2[1]) << 8;
+  case 1:
+    h ^= uint64_t(data2[0]);
+    h *= m;
+  };
+
+  h ^= h >> r;
+  h *= m;
+  h ^= h >> r;
+
+  return h;
 }
+
+size_t UniqueID::hash() const { return MurmurHash64A(&id_[0], kUniqueIDSize, 0); }
 
 std::ostream &operator<<(std::ostream &os, const UniqueID &id) {
   os << id.hex();
@@ -116,6 +178,7 @@ const ObjectID ComputeReturnId(const TaskID &task_id, int64_t return_index) {
 
 const ObjectID ComputePutId(const TaskID &task_id, int64_t put_index) {
   RAY_CHECK(put_index >= 1 && put_index <= kMaxTaskPuts);
+  // We multiply put_index by -1 to distinguish from return_index.
   return ComputeObjectId(task_id, -1 * put_index);
 }
 
@@ -126,6 +189,26 @@ const TaskID ComputeTaskId(const ObjectID &object_id) {
   // object ID.
   uint64_t bitmask = static_cast<uint64_t>(-1) << kObjectIdIndexSize;
   *first_bytes = *first_bytes & (bitmask);
+  return task_id;
+}
+
+const TaskID GenerateTaskId(const DriverID &driver_id, const TaskID &parent_task_id,
+                            int parent_task_counter) {
+  // Compute hashes.
+  SHA256_CTX ctx;
+  sha256_init(&ctx);
+  sha256_update(&ctx, (BYTE *)&driver_id, sizeof(driver_id));
+  sha256_update(&ctx, (BYTE *)&parent_task_id, sizeof(parent_task_id));
+  sha256_update(&ctx, (BYTE *)&parent_task_counter, sizeof(parent_task_counter));
+
+  // Compute the final task ID from the hash.
+  BYTE buff[DIGEST_SIZE];
+  sha256_final(&ctx, buff);
+  TaskID task_id;
+  RAY_DCHECK(sizeof(task_id) <= DIGEST_SIZE);
+  memcpy(&task_id, buff, sizeof(task_id));
+  task_id = FinishTaskId(task_id);
+
   return task_id;
 }
 

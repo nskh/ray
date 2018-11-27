@@ -3,27 +3,49 @@ from __future__ import division
 from __future__ import print_function
 
 import distutils.spawn
+import logging
 import os
-import pipes
 import subprocess
 import time
+
+try:  # py3
+    from shlex import quote
+except ImportError:  # py2
+    from pipes import quote
 
 import ray
 from ray.tune.cluster_info import get_ssh_key, get_ssh_user
 from ray.tune.error import TuneError
 from ray.tune.result import DEFAULT_RESULTS_DIR
 
+logger = logging.getLogger(__name__)
+
 # Map from (logdir, remote_dir) -> syncer
 _syncers = {}
+
+S3_PREFIX = "s3://"
+GCS_PREFIX = "gs://"
+ALLOWED_REMOTE_PREFIXES = (S3_PREFIX, GCS_PREFIX)
 
 
 def get_syncer(local_dir, remote_dir=None):
     if remote_dir:
-        if not remote_dir.startswith("s3://"):
-            raise TuneError("Upload uri must start with s3://")
+        if not any(
+                remote_dir.startswith(prefix)
+                for prefix in ALLOWED_REMOTE_PREFIXES):
+            raise TuneError("Upload uri must start with one of: {}"
+                            "".format(ALLOWED_REMOTE_PREFIXES))
 
-        if not distutils.spawn.find_executable("aws"):
-            raise TuneError("Upload uri requires awscli tool to be installed")
+        if (remote_dir.startswith(S3_PREFIX)
+                and not distutils.spawn.find_executable("aws")):
+            raise TuneError(
+                "Upload uri starting with '{}' requires awscli tool"
+                " to be installed".format(S3_PREFIX))
+        elif (remote_dir.startswith(GCS_PREFIX)
+              and not distutils.spawn.find_executable("gsutil")):
+            raise TuneError(
+                "Upload uri starting with '{}' requires gsutil tool"
+                " to be installed".format(GCS_PREFIX))
 
         if local_dir.startswith(DEFAULT_RESULTS_DIR + "/"):
             rel_path = os.path.relpath(local_dir, DEFAULT_RESULTS_DIR)
@@ -54,7 +76,8 @@ class _LogSyncer(object):
         self.sync_process = None
         self.local_ip = ray.services.get_node_ip_address()
         self.worker_ip = None
-        print("Created LogSyncer for {} -> {}".format(local_dir, remote_dir))
+        logger.info("Created LogSyncer for {} -> {}".format(
+            local_dir, remote_dir))
 
     def set_worker_ip(self, worker_ip):
         """Set the worker ip to sync logs from."""
@@ -68,7 +91,7 @@ class _LogSyncer(object):
     def sync_now(self, force=False):
         self.last_sync_time = time.time()
         if not self.worker_ip:
-            print("Worker ip unknown, skipping log sync for {}".format(
+            logger.info("Worker ip unknown, skipping log sync for {}".format(
                 self.local_dir))
             return
 
@@ -78,21 +101,25 @@ class _LogSyncer(object):
             ssh_key = get_ssh_key()
             ssh_user = get_ssh_user()
             if ssh_key is None or ssh_user is None:
-                print("Error: log sync requires cluster to be setup with "
-                      "`ray create_or_update`.")
+                logger.error("Log sync requires cluster to be setup with "
+                             "`ray create_or_update`.")
                 return
             if not distutils.spawn.find_executable("rsync"):
-                print("Error: log sync requires rsync to be installed.")
+                logger.error("Log sync requires rsync to be installed.")
                 return
             worker_to_local_sync_cmd = ((
-                """rsync -avz -e "ssh -i '{}' -o ConnectTimeout=120s """
+                """rsync -avz -e "ssh -i {} -o ConnectTimeout=120s """
                 """-o StrictHostKeyChecking=no" '{}@{}:{}/' '{}/'""").format(
-                    ssh_key, ssh_user, self.worker_ip,
-                    pipes.quote(self.local_dir), pipes.quote(self.local_dir)))
+                    quote(ssh_key), ssh_user, self.worker_ip,
+                    quote(self.local_dir), quote(self.local_dir)))
 
         if self.remote_dir:
-            local_to_remote_sync_cmd = ("aws s3 sync '{}' '{}'".format(
-                pipes.quote(self.local_dir), pipes.quote(self.remote_dir)))
+            if self.remote_dir.startswith(S3_PREFIX):
+                local_to_remote_sync_cmd = ("aws s3 sync {} {}".format(
+                    quote(self.local_dir), quote(self.remote_dir)))
+            elif self.remote_dir.startswith(GCS_PREFIX):
+                local_to_remote_sync_cmd = ("gsutil rsync -r {} {}".format(
+                    quote(self.local_dir), quote(self.remote_dir)))
         else:
             local_to_remote_sync_cmd = None
 
@@ -102,7 +129,7 @@ class _LogSyncer(object):
                 if force:
                     self.sync_process.kill()
                 else:
-                    print("Warning: last sync is still in progress, skipping")
+                    logger.warning("Last sync is still in progress, skipping.")
                     return
 
         if worker_to_local_sync_cmd or local_to_remote_sync_cmd:
@@ -113,7 +140,7 @@ class _LogSyncer(object):
                 if final_cmd:
                     final_cmd += " && "
                 final_cmd += local_to_remote_sync_cmd
-            print("Running log sync: {}".format(final_cmd))
+            logger.info("Running log sync: {}".format(final_cmd))
             self.sync_process = subprocess.Popen(final_cmd, shell=True)
 
     def wait(self):

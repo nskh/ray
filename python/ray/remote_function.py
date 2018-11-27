@@ -6,21 +6,13 @@ import copy
 import hashlib
 import inspect
 
+import ray.ray_constants as ray_constants
 import ray.signature
 
 # Default parameters for remote functions.
 DEFAULT_REMOTE_FUNCTION_CPUS = 1
 DEFAULT_REMOTE_FUNCTION_NUM_RETURN_VALS = 1
 DEFAULT_REMOTE_FUNCTION_MAX_CALLS = 0
-
-
-def in_ipython():
-    """Return true if we are in an IPython interpreter and false otherwise."""
-    try:
-        __IPYTHON__
-        return True
-    except NameError:
-        return False
 
 
 def compute_function_id(function):
@@ -36,17 +28,17 @@ def compute_function_id(function):
     # Include the function module and name in the hash.
     function_id_hash.update(function.__module__.encode("ascii"))
     function_id_hash.update(function.__name__.encode("ascii"))
-    # If we are running a script or are in IPython, include the source code in
-    # the hash. If we are in a regular Python interpreter we skip this part
-    # because the source code is not accessible. If the function is a built-in
-    # (e.g., Cython), the source code is not accessible.
-    import __main__ as main
-    if (hasattr(main, "__file__") or in_ipython()) \
-            and inspect.isfunction(function):
-        function_id_hash.update(inspect.getsource(function).encode("ascii"))
+    try:
+        # If we are running a script or are in IPython, include the source code
+        # in the hash.
+        source = inspect.getsource(function).encode("ascii")
+        function_id_hash.update(source)
+    except (IOError, OSError, TypeError):
+        # Source code may not be available: e.g. Cython or Python interpreter.
+        pass
     # Compute the function ID.
     function_id = function_id_hash.digest()
-    assert len(function_id) == 20
+    assert len(function_id) == ray_constants.ID_SIZE
     function_id = ray.ObjectID(function_id)
 
     return function_id
@@ -98,7 +90,7 @@ class RemoteFunction(object):
 
         # # Export the function.
         worker = ray.worker.get_global_worker()
-        if worker.mode in [ray.worker.SCRIPT_MODE, ray.worker.SILENT_MODE]:
+        if worker.mode == ray.worker.SCRIPT_MODE:
             self._export()
         elif worker.mode is None:
             worker.cached_remote_functions_and_actors.append(
@@ -123,7 +115,6 @@ class RemoteFunction(object):
         """An experimental alternate way to submit remote functions."""
         worker = ray.worker.get_global_worker()
         worker.check_connected()
-        ray.worker.check_main_thread()
         kwargs = {} if kwargs is None else kwargs
         args = ray.signature.extend_args(self._function_signature, args,
                                          kwargs)
@@ -134,8 +125,8 @@ class RemoteFunction(object):
         resources = ray.utils.resources_from_resource_arguments(
             self._num_cpus, self._num_gpus, self._resources, num_cpus,
             num_gpus, resources)
-        if worker.mode == ray.worker.PYTHON_MODE:
-            # In PYTHON_MODE, remote calls simply execute the function.
+        if worker.mode == ray.worker.LOCAL_MODE:
+            # In LOCAL_MODE, remote calls simply execute the function.
             # We copy the arguments to prevent the function call from
             # mutating them and to match the usual behavior of
             # immutable remote objects.

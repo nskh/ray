@@ -1,6 +1,7 @@
 #ifndef GLOBAL_SCHEDULER_ALGORITHM_H
 #define GLOBAL_SCHEDULER_ALGORITHM_H
 
+#include <chrono>
 #include <random>
 
 #include "common.h"
@@ -15,19 +16,26 @@
  *
  */
 
-typedef enum {
+enum class GlobalSchedulerAlgorithm {
   SCHED_ALGORITHM_ROUND_ROBIN = 1,
   SCHED_ALGORITHM_TRANSFER_AWARE = 2,
   SCHED_ALGORITHM_MAX
-} global_scheduler_algorithm;
+};
 
 /// The class encapsulating state managed by the global scheduling policy.
 class GlobalSchedulerPolicyState {
  public:
   GlobalSchedulerPolicyState(int64_t round_robin_index)
-      : round_robin_index_(round_robin_index), gen_(rd_()) {}
+      : round_robin_index_(round_robin_index),
+        gen_(std::chrono::high_resolution_clock::now()
+                 .time_since_epoch()
+                 .count()) {}
 
-  GlobalSchedulerPolicyState() : round_robin_index_(0), gen_(rd_()) {}
+  GlobalSchedulerPolicyState()
+      : round_robin_index_(0),
+        gen_(std::chrono::high_resolution_clock::now()
+                 .time_since_epoch()
+                 .count()) {}
 
   /// Return the policy's random number generator.
   ///
@@ -42,8 +50,6 @@ class GlobalSchedulerPolicyState {
  private:
   /// The index of the next local scheduler to assign a task to.
   int64_t round_robin_index_;
-  /// Internally maintained random number engine device.
-  std::random_device rd_;
   /// Internally maintained random number generator.
   std::mt19937_64 gen_;
 };

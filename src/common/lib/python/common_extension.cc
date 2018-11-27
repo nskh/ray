@@ -10,7 +10,9 @@
 #include "common.h"
 #include "common_extension.h"
 #include "common_protocol.h"
+#include "ray/raylet/task.h"
 #include "ray/raylet/task_spec.h"
+#include "ray/raylet/task_execution_spec.h"
 #include "task.h"
 
 #include <string>
@@ -143,7 +145,15 @@ PyObject *PyTask_to_string(PyObject *self, PyObject *args) {
     return NULL;
   }
   PyTask *task = (PyTask *) arg;
-  return PyBytes_FromStringAndSize((char *) task->spec, task->size);
+  if (!use_raylet(task)) {
+    return PyBytes_FromStringAndSize((char *) task->spec, task->size);
+  } else {
+    flatbuffers::FlatBufferBuilder fbb;
+    auto task_spec_string = task->task_spec->ToFlatbuffer(fbb);
+    fbb.Finish(task_spec_string);
+    return PyBytes_FromStringAndSize((char *) fbb.GetBufferPointer(),
+                                     fbb.GetSize());
+  }
 }
 
 static PyObject *PyObjectID_id(PyObject *self) {
@@ -155,7 +165,11 @@ static PyObject *PyObjectID_id(PyObject *self) {
 static PyObject *PyObjectID_hex(PyObject *self) {
   PyObjectID *s = (PyObjectID *) self;
   std::string hex_id = s->object_id.hex();
-  PyObject *result = PyUnicode_FromString(hex_id.c_str());
+#if PY_MAJOR_VERSION >= 3
+  PyObject *result = PyUnicode_FromStringAndSize(hex_id.data(), hex_id.size());
+#else
+  PyObject *result = PyBytes_FromStringAndSize(hex_id.data(), hex_id.size());
+#endif
   return result;
 }
 
@@ -448,7 +462,8 @@ static int PyTask_init(PyTask *self, PyObject *args, PyObject *kwds) {
     self->task_spec = new ray::raylet::TaskSpecification(
         driver_id, parent_task_id, parent_counter, actor_creation_id,
         actor_creation_dummy_object_id, actor_id, actor_handle_id,
-        actor_counter, function_id, args, num_returns, required_resources);
+        actor_counter, function_id, args, num_returns, required_resources,
+        Language::PYTHON);
   }
 
   /* Set the task's execution dependencies. */
@@ -693,6 +708,23 @@ static PyObject *PyTask_execution_dependencies_string(PyTask *self) {
                                    fbb.GetSize());
 }
 
+static PyObject *PyTask_to_serialized_flatbuf(PyTask *self) {
+  RAY_CHECK(use_raylet(self));
+
+  const std::vector<ObjectID> execution_dependencies(
+      *self->execution_dependencies);
+  auto const execution_spec = ray::raylet::TaskExecutionSpecification(
+      std::move(execution_dependencies));
+  auto const task = ray::raylet::Task(execution_spec, *self->task_spec);
+
+  flatbuffers::FlatBufferBuilder fbb;
+  auto task_flatbuffer = task.ToFlatbuffer(fbb);
+  fbb.Finish(task_flatbuffer);
+
+  return PyBytes_FromStringAndSize(
+      reinterpret_cast<char *>(fbb.GetBufferPointer()), fbb.GetSize());
+}
+
 static PyMethodDef PyTask_methods[] = {
     {"function_id", (PyCFunction) PyTask_function_id, METH_NOARGS,
      "Return the function ID for this task."},
@@ -722,6 +754,11 @@ static PyMethodDef PyTask_methods[] = {
     {"execution_dependencies_string",
      (PyCFunction) PyTask_execution_dependencies_string, METH_NOARGS,
      "Return the execution dependencies for the task as a string."},
+    {"_serialized_raylet_task", (PyCFunction) PyTask_to_serialized_flatbuf,
+     METH_NOARGS,
+     "This is a hack used to create a serialized flatbuffer object for the "
+     "driver task. We're doing this because creating the flatbuffer object in "
+     "Python didn't seem to work."},
     {NULL} /* Sentinel */
 };
 
@@ -870,4 +907,13 @@ PyObject *check_simple_value(PyObject *self, PyObject *args) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
+}
+
+PyObject *compute_task_id(PyObject *self, PyObject *args) {
+  ObjectID object_id;
+  if (!PyArg_ParseTuple(args, "O&", &PyObjectToUniqueID, &object_id)) {
+    return NULL;
+  }
+  TaskID task_id = ray::ComputeTaskId(object_id);
+  return PyObjectID_make(task_id);
 }
